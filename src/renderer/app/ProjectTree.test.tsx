@@ -37,6 +37,7 @@ function setup(groups: ProjectGroup[] = [{ id: 'g1', name: 'Work', collapsed: fa
     'projects:move': () => undefined,
     'projects:rename': () => shop,
     'projects:setPinned': () => shop,
+    'projects:remove': () => undefined,
   });
   renderWithProviders(<Sidebar projects={[shop, blog, notes]} selectedId={null} />);
   return bridge;
@@ -112,6 +113,20 @@ describe('Sidebar groups', () => {
     await userEvent.type(input, 'x{Escape}');
     expect(screen.queryByRole('textbox', { name: 'Project name' })).toBeNull();
     expect(bridge.callsTo('projects:rename')).toEqual([]);
+  });
+
+  it('removes a project from its menu after asking', async () => {
+    const bridge = setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for notes' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove “notes” from NestBox?' });
+    expect(dialog).toHaveTextContent('The folder on disk is not touched.');
+    expect(bridge.callsTo('projects:remove')).toEqual([]);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(bridge.callsTo('projects:remove')).toEqual([{ id: 'p3' }]));
+    // The sidebar stays usable after the dialog closes.
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for blog' }));
+    expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeInTheDocument();
   });
 
   it('moves a project to a group and up or down from its menu', async () => {

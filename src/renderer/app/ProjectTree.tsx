@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { useGroups, useLayoutActions, useProcesses } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/state/ui-store';
+import { RemoveProjectDialog } from './RemoveProjectDialog';
 
 const PROJECT_TYPE = 'application/x-nestbox-project';
 const GROUP_TYPE = 'application/x-nestbox-group';
@@ -387,6 +388,9 @@ function ProjectItem({ project, siblings, groupId, state }: ProjectItemProps) {
   const { data: processes = [] } = useProcesses();
   const { actions } = state;
   const menu = useRenameMenu(() => state.setRenaming(`p:${project.id}`));
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  /** Remove was picked: focus goes to the confirmation, not back to the menu's trigger. */
+  const removeChosen = useRef(false);
   const stateOf = (projectId: string, withWorkspaces: boolean): AggregateState =>
     aggregateState(
       processes
@@ -447,7 +451,8 @@ function ProjectItem({ project, siblings, groupId, state }: ProjectItemProps) {
             )}
           </button>
         )}
-        <DropdownMenu>
+        {/* modal={false}: opening the confirmation from a menu item must not leave pointer-events locked. */}
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -457,7 +462,14 @@ function ProjectItem({ project, siblings, groupId, state }: ProjectItemProps) {
               <MoreHorizontal className="size-3.5" aria-hidden />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onCloseAutoFocus={menu.onCloseAutoFocus}>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              menu.onCloseAutoFocus(event);
+              if (removeChosen.current) event.preventDefault();
+              removeChosen.current = false;
+            }}
+          >
             <DropdownMenuItem onSelect={menu.onSelectRename}>
               Rename
             </DropdownMenuItem>
@@ -518,8 +530,19 @@ function ProjectItem({ project, siblings, groupId, state }: ProjectItemProps) {
                 </DropdownMenuItem>
               </>
             )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => {
+                removeChosen.current = true;
+                setConfirmRemove(true);
+              }}
+            >
+              Remove…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <RemoveProjectDialog project={project} open={confirmRemove} onOpenChange={setConfirmRemove} />
       </div>
       {workspaces.length > 0 && !collapsed && (
         <ul className="mt-0.5 ml-4 space-y-0.5 border-l border-line pl-2">

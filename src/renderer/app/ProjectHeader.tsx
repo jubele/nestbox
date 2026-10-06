@@ -1,16 +1,6 @@
 import { ExternalLink, Folder, GitBranch, MoreHorizontal, Square, SquareTerminal } from 'lucide-react';
 import { belongsTo, isLive } from '@shared/processes';
 import { useRef, useState } from 'react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,12 +16,12 @@ import {
   useOpenInEditor,
   useOpenTerminal,
   useRefreshProject,
-  useRemoveProject,
   useRenameProject,
   useSetPinned,
 } from '@/lib/queries';
 import { useGitStatus } from '@/tools/git/use-git';
 import type { ProjectNode } from './find-project';
+import { RemoveProjectDialog } from './RemoveProjectDialog';
 import { RenameInput } from './RenameInput';
 
 export function ProjectHeader({ node }: { node: ProjectNode }) {
@@ -43,13 +33,11 @@ export function ProjectHeader({ node }: { node: ProjectNode }) {
   const openTerminal = useOpenTerminal();
   const refresh = useRefreshProject();
   const rename = useRenameProject();
-  const remove = useRemoveProject();
   const setPinned = useSetPinned();
   const stopAll = useStopAll();
   const { data: processes = [] } = useProcesses();
   const live = (projectId: string) => processes.filter((p) => isLive(p.state) && belongsTo(p.projectId, projectId)).length;
   const liveHere = live(detected.id);
-  const liveInRoot = live(summary.id);
   // The git tool's live status (shared with its card), so a checkout shows here without a project refresh.
   const { data: git } = useGitStatus(detected.id, detected.git !== null);
   const liveRef = git?.state === 'ok' ? (git.branch ?? git.detachedAt) : null;
@@ -187,27 +175,7 @@ export function ProjectHeader({ node }: { node: ProjectNode }) {
           </DropdownMenu>
         </div>
       </div>
-      <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{summary.name}” from NestBox?</AlertDialogTitle>
-            <AlertDialogDescription>
-              NestBox forgets this project and its settings. The folder on disk is not touched.
-              {liveInRoot > 0 &&
-                ` ${liveInRoot} running ${liveInRoot === 1 ? 'script' : 'scripts'} will be stopped.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-err text-fg hover:bg-err/90"
-              onClick={() => remove.mutate(summary.id)}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RemoveProjectDialog project={summary} open={confirmRemove} onOpenChange={setConfirmRemove} />
     </div>
   );
 }
