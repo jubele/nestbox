@@ -59,6 +59,10 @@ const devServerUrl = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER
 // single-instance lock, which is keyed on the userData folder.
 const userDataOverride = app.isPackaged ? undefined : process.env['NESTBOX_USER_DATA_DIR'];
 if (userDataOverride) app.setPath('userData', userDataOverride);
+// End-to-end tests (unpackaged only): windows show without taking focus, and on macOS the app stays out of the
+// Dock and never comes to the front, so a test run doesn't steal the screen.
+const quietWindow = !app.isPackaged && process.env['NESTBOX_E2E_QUIET'] === '1';
+if (quietWindow) app.dock?.hide();
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -70,6 +74,10 @@ if (!app.requestSingleInstanceLock()) {
   const showWindow = (): void => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
+    if (quietWindow) {
+      mainWindow.showInactive();
+      return;
+    }
     mainWindow.show();
     mainWindow.focus();
   };
@@ -489,6 +497,7 @@ if (!app.requestSingleInstanceLock()) {
       devServerUrl,
       icon: brandAsset(assetEnv, 'png/nestbox.ico'),
       onQuitShortcut: () => void quitController.requestQuit(),
+      quiet: quietWindow,
     });
     const hasOverlay = 'titleBarOverlay' in platform.windowChrome({ color: '', symbolColor: '', height: 0 });
     nativeTheme.on('updated', () => {

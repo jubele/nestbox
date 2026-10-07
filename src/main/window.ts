@@ -11,6 +11,8 @@ export interface MainWindowOptions {
   dark: boolean;
   /** Ctrl+Q (⌘Q on macOS) inside the window. */
   onQuitShortcut(): void;
+  /** Show the window without focusing it (end-to-end tests, so a run doesn't take over the screen). */
+  quiet?: boolean;
 }
 
 export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
@@ -37,7 +39,7 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
       spellcheck: false,
     },
   });
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => (opts.quiet ? win.showInactive() : win.show()));
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && (input.control || input.meta) && input.key.toLowerCase() === 'q') {
       event.preventDefault();

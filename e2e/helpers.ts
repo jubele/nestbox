@@ -57,6 +57,8 @@ export async function launch(
       ...process.env,
       [pathKey]: path,
       NESTBOX_USER_DATA_DIR: userData,
+      // The window shows without taking focus (and stays out of the macOS Dock); NESTBOX_E2E_SHOW=1 to watch.
+      ...(process.env['NESTBOX_E2E_SHOW'] ? {} : { NESTBOX_E2E_QUIET: '1' }),
       // macOS and Linux build PATH from a login shell, which puts system folders first: prepend there too.
       ...(opts.pathPrepend ? { NESTBOX_PATH_PREPEND: opts.pathPrepend } : {}),
     }).filter(
