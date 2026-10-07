@@ -137,6 +137,10 @@ export interface PlatformAdapter {
   notificationAppId(): string | null;
   /** Whether a command (name on PATH, or a path) exists; null when it cannot be checked. */
   commandExists(command: string): Promise<boolean | null>;
+  /** The Python interpreter when a package has no virtualenv: python on Windows, python3 on macOS. */
+  readonly pythonCommand: string;
+  /** A virtualenv's folder of executables (`Scripts` on Windows, `bin` elsewhere). */
+  venvBinDir(venvPath: string): string;
 }
 
 export function notImplemented(method: string): never {

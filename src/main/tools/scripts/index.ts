@@ -1,7 +1,7 @@
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatCommandLine } from '@shared/command-line';
-import { type DetectedProject, workspaceId } from '@shared/detected';
+import { type DetectedProject, type EcosystemId, workspaceId } from '@shared/detected';
 import { NestboxError } from '@shared/errors';
 import { isLive, type LogLine, type ProcessState, type ProcessSummary } from '@shared/processes';
 import {
@@ -14,7 +14,9 @@ import {
   type SkippedEntry,
 } from '@shared/tools/scripts/contract';
 import type { RunGroup, RunGroupCompose, RunGroupEntry } from '@shared/types';
-import { ECOSYSTEM_MODULES } from '../../ecosystems';
+import { ECOSYSTEM_MODULES, type EcosystemChoices } from '../../ecosystems';
+import { type PythonInfo, resolveVenv } from '../../ecosystems/python';
+import { findProjectVenvs } from '../../ecosystems/python/venvs';
 import type { Logger } from '../../logger';
 import type { ProcessManager, StartRequest } from '../../processes/process-manager';
 import type { SharedContext } from '../shared-context';
@@ -71,6 +73,8 @@ interface Runnable {
   command: string;
   /** null for a package.json script (`<pm> run <name>`). */
   argv: string[] | null;
+  /** The module a detected task comes from. */
+  ecosystem?: EcosystemId;
 }
 
 const isEntry =
@@ -106,12 +110,36 @@ function runnables(project: DetectedProject, settings: ScriptsSettings): Runnabl
     const tasks = module.tasks(entry.info);
     for (const task of tasks) {
       if (hiddenForPackage.includes(task.name)) continue;
-      detected.push(asRunnable('detected')(task));
+      detected.push({ ...asRunnable('detected')(task), ecosystem: entry.id });
     }
   }
 
   const custom = settings.commands.filter((c) => c.relPath === project.relPath).map(asRunnable('custom')).filter(unique);
   return [...npm, ...detected.filter(unique), ...custom];
+}
+
+/** Detected tasks the user hid, unless something else now has the name. */
+function hiddenOf(project: DetectedProject, settings: ScriptsSettings): { name: string; command: string }[] {
+  const hidden = settings.hidden[project.relPath] ?? [];
+  const names = new Set(runnables(project, settings).map((r) => r.name));
+  return project.ecosystems.flatMap((entry) =>
+    (ECOSYSTEM_MODULES.find((m) => m.id === entry.id)?.tasks(entry.info) ?? [])
+      .filter((t) => hidden.includes(t.name) && !names.has(t.name))
+      .map((t) => ({ name: t.name, command: formatCommandLine(t.argv) })),
+  );
+}
+
+/** The package's environment choice, as every module's runEnv gets it. */
+function choicesOf(settings: ScriptsSettings, project: DetectedProject): EcosystemChoices {
+  const choice = settings.venvs.find((v) => v.relPath === project.relPath);
+  return choice ? { venv: choice.venv } : {};
+}
+
+/** A path for display and storage: posix from the project folder when inside it, else absolute as is. */
+function fromRoot(rootPath: string, abs: string): string {
+  const rel = relative(rootPath, abs);
+  if (rel === '') return '.';
+  return rel.startsWith('..') || isAbsolute(rel) ? abs : rel.split(sep).join('/');
 }
 
 /** A list of per-script settings with one package's `from` renamed to `to`. */
@@ -193,6 +221,29 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
     }
   }
 
+  /** The project folder (the root package's path). */
+  const rootPathOf = (project: DetectedProject): string =>
+    project.relPath === '' ? project.path : deps.getDetected(project.rootId).path;
+
+  const pythonInfoOf = (project: DetectedProject): PythonInfo | null =>
+    (project.ecosystems.find((e) => e.id === 'python')?.info as PythonInfo | undefined) ?? null;
+
+  /** A Python package's environment for the Scripts tab: the choice, the one in use and auto's. */
+  async function pythonChoice(settings: ScriptsSettings, project: DetectedProject) {
+    const info = pythonInfoOf(project);
+    if (info === null) return null;
+    const rootDir = rootPathOf(project);
+    const ctx = { dir: project.path, rootDir, platform: deps.platform };
+    const choices = choicesOf(settings, project);
+    const used = await resolveVenv({ ...ctx, settings: choices }, info);
+    const auto = await resolveVenv({ ...ctx, settings: {} }, info);
+    return {
+      choice: choices.venv === undefined ? ('auto' as const) : choices.venv === null ? ('none' as const) : ('path' as const),
+      venv: used.venv === null ? null : fromRoot(rootDir, used.venv),
+      auto: auto.venv === null ? null : fromRoot(rootDir, auto.venv),
+    };
+  }
+
   /** The Node tool is asked only about package.json scripts. The env file is read at every spawn. */
   const requestFor = async (
     settings: ScriptsSettings,
@@ -214,33 +265,30 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
       return { ...base, ...(await adviceFor(project.id)) };
     }
 
-    // Custom or detected commands: use argv directly
-    const withArgv: StartRequest = { ...base, argv: runnable.argv };
-
-    // Detected commands: apply ecosystem's runEnv
-    if (runnable.kind === 'detected') {
-      // Find which ecosystem module provides this task
-      for (const entry of project.ecosystems) {
-        const module = ECOSYSTEM_MODULES.find((m) => m.id === entry.id);
-        if (!module) continue;
-        const tasks = module.tasks(entry.info);
-        const task = tasks.find((t) => t.name === runnable.name);
-        if (task) {
-          const runEnv = await module.runEnv(
-            { dir: project.path, platform: deps.platform, settings: {} },
-            entry.info,
-          );
-          return {
-            ...withArgv,
-            ...(runEnv.pathPrepend ? { pathPrepend: runEnv.pathPrepend } : {}),
-            ...(runEnv.env ? { env: runEnv.env } : {}),
-            ...(runEnv.note ? { note: runEnv.note } : {}),
-          };
-        }
-      }
+    // Custom and detected commands run as argv, in the environment of the package's ecosystems (a detected
+    // task in its own module's only): PATH entry, variables, a program swap such as python → python3.
+    const entries = project.ecosystems.filter(
+      (entry) => runnable.kind !== 'detected' || entry.id === runnable.ecosystem,
+    );
+    let request: StartRequest = { ...base, argv: runnable.argv };
+    for (const entry of entries) {
+      const module = ECOSYSTEM_MODULES.find((m) => m.id === entry.id);
+      if (!module) continue;
+      const runEnv = await module.runEnv(
+        { dir: project.path, rootDir: rootPathOf(project), platform: deps.platform, settings: choicesOf(settings, project) },
+        entry.info,
+      );
+      const [program = '', ...args] = request.argv ?? [];
+      const swapped = runEnv.programs?.[program];
+      request = {
+        ...request,
+        ...(swapped ? { argv: [swapped, ...args] } : {}),
+        ...(runEnv.env ? { env: { ...request.env, ...runEnv.env } } : {}),
+        ...(runEnv.pathPrepend && !request.pathPrepend ? { pathPrepend: runEnv.pathPrepend } : {}),
+        ...(runEnv.note && !request.note ? { note: runEnv.note } : {}),
+      };
     }
-
-    return withArgv;
+    return request;
   };
 
   function requireRoot(project: DetectedProject): void {
@@ -336,7 +384,9 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
           // The main one first.
           .sort((a, b) => Number(b.main) - Number(a.main));
         const envFiles = await deps.envFiles.list(ctx.project.path).catch(() => []);
-        if (ctx.project.relPath !== '') return { scripts, runGroups: null, packages: null, envFiles };
+        const hidden = hiddenOf(ctx.project, settings);
+        const python = await pythonChoice(settings, ctx.project);
+        if (ctx.project.relPath !== '') return { scripts, runGroups: null, packages: null, envFiles, hidden, python };
         const packages = [ctx.project, ...ctx.project.workspaces].map((p) => {
           const names = runnables(p, settings).map((r) => r.name);
           const pkgMain = mainOf(settings, p);
@@ -348,7 +398,7 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
             main: pkgMain !== null && names.includes(pkgMain) ? pkgMain : null,
           };
         });
-        return { scripts, runGroups: deps.runGroups.get(ctx.project.rootId), packages, envFiles };
+        return { scripts, runGroups: deps.runGroups.get(ctx.project.rootId), packages, envFiles, hidden, python };
       },
 
       start: async (ctx: Ctx, { script }) => {
@@ -589,6 +639,38 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
             ...s.hidden,
             [relPath]: [...(s.hidden[relPath] ?? []), name].filter((n, i, a) => a.indexOf(n) === i),
           },
+        }));
+      },
+
+      files: async (ctx: Ctx) => {
+        const lists = await Promise.all(
+          ctx.project.ecosystems.map(async (entry) => {
+            const module = ECOSYSTEM_MODULES.find((m) => m.id === entry.id);
+            return (await module?.files?.(ctx.project.path, entry.info).catch(() => [])) ?? [];
+          }),
+        );
+        return { files: lists.flat() };
+      },
+
+      pythonEnvs: async (ctx: Ctx) => ({ envs: await findProjectVenvs(rootPathOf(ctx.project)).catch(() => []) }),
+
+      setVenv: async (ctx: Ctx, { mode, path }) => {
+        if (pythonInfoOf(ctx.project) === null) throw new NestboxError('VALIDATION', 'Not a Python package');
+        const { relPath } = ctx.project;
+        let venv: string | null = null;
+        if (mode === 'path') {
+          if (path === undefined) throw new NestboxError('VALIDATION', 'Choose a virtualenv folder');
+          const root = rootPathOf(ctx.project);
+          const trimmed = path.trim();
+          const abs = isAbsolute(trimmed) ? trimmed : join(root, ...trimmed.split(/[\\/]/));
+          if (!(await deps.isFile(join(abs, 'pyvenv.cfg')))) {
+            throw new NestboxError('VALIDATION', 'Not a virtualenv: that folder has no pyvenv.cfg');
+          }
+          venv = fromRoot(root, abs);
+        }
+        ctx.settings.update((s) => ({
+          ...s,
+          venvs: [...s.venvs.filter((v) => v.relPath !== relPath), ...(mode === 'auto' ? [] : [{ relPath, venv }])],
         }));
       },
 

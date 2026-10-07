@@ -4,6 +4,7 @@ This directory contains ecosystem modules that detect and provide commands for d
 
 ## Current Modules
 
+- **python** - Python packages (pyproject.toml, requirements*.txt, Pipfile, setup.py/cfg, manage.py, or top-level `.py` files)
 - **dotnet** - .NET projects (.sln, .csproj, .fsproj)
 
 ## Adding a New Module

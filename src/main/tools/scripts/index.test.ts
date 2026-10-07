@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DetectedProject } from '@shared/detected';
 import { NestboxError } from '@shared/errors';
 import { makeDetectedForTest } from '@shared/test-fixtures';
 import type { RunGroup } from '@shared/types';
+import { makeTree, removeTree } from '../../detection/test-fixtures';
 import { createMemoryLogger } from '../../logger';
 import { createDarwinAdapter } from '../../platform/darwin';
 import type { SpawnOpts } from '../../platform/adapter';
@@ -120,6 +121,8 @@ describe('scripts tool: list and lifecycle', () => {
         { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false, main: null },
       ],
       envFiles: ['.env', '.env.local'],
+      hidden: [],
+      python: null,
     });
   });
 
@@ -154,11 +157,11 @@ describe('scripts tool: list and lifecycle', () => {
     const { call, toolSettings, processes } = setup();
     await call(api.id, 'start', { script: 'dev' });
     expect(await call(api.id, 'setAutoRestart', { script: 'dev', enabled: true })).toEqual({ enabled: true });
-    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [{ relPath: 'packages/api', script: 'dev' }], commands: [], envFiles: [], main: [], hidden: {} });
+    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [{ relPath: 'packages/api', script: 'dev' }], commands: [], envFiles: [], main: [], hidden: {}, venvs: [] });
     expect(processes.get(api.id, 'dev')?.autoRestart).toBe(true);
     expect(await call(api.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', autoRestart: true }] });
     await call(api.id, 'setAutoRestart', { script: 'dev', enabled: false });
-    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [], commands: [], envFiles: [], main: [], hidden: {} });
+    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [], commands: [], envFiles: [], main: [], hidden: {}, venvs: [] });
   });
 
   it('starts with auto-restart from settings', async () => {
@@ -507,6 +510,8 @@ describe('scripts tool: custom commands', () => {
       runGroups: null,
       packages: null,
       envFiles: ['.env', '.env.local'],
+      hidden: [],
+      python: null,
     });
     expect(await call('r2', 'list')).toMatchObject({
       scripts: [],
@@ -675,5 +680,95 @@ describe('scripts tool: main command', () => {
     await call(backend.id, 'setMain', { script: 'server', main: true });
     await call(backend.id, 'deleteCommand', { name: 'server' });
     expect(toolSettings.get('r2/scripts')).toMatchObject({ main: [] });
+  });
+});
+
+describe('scripts tool: ecosystems (Python)', () => {
+  let tree = '';
+  afterEach(async () => removeTree(tree));
+
+  /** frontend/ (npm) + backend/ (Python, its own .venv) on disk, so runEnv can find pyvenv.cfg. */
+  async function pythonSetup(files: Record<string, string> = {}) {
+    tree = await makeTree({ 'backend/.venv/pyvenv.cfg': '', 'backend/main.py': '', 'backend/tools/seed.py': '', ...files });
+    const info = { venv: '.venv', framework: null, entries: ['main.py'], tests: true };
+    const backend = makeDetectedForTest({
+      id: 'p3::backend',
+      rootId: 'p3',
+      relPath: 'backend',
+      name: 'backend',
+      path: join(tree, 'backend'),
+      packageJson: null,
+      packageManager: null,
+      ecosystems: [{ id: 'python', info }],
+    });
+    const root = makeDetectedForTest({ id: 'p3', rootId: 'p3', path: tree, name: 'app', packageJson: null, workspaces: [backend] });
+    return { ...setup([root, backend]), backend };
+  }
+
+  it('lists the tasks as detected rows, and hides and restores them', async () => {
+    const { call, backend } = await pythonSetup();
+    expect(await call(backend.id, 'list')).toMatchObject({
+      scripts: [
+        { name: 'main', command: 'python main.py', kind: 'detected' },
+        { name: 'pytest', command: 'python -m pytest', kind: 'detected' },
+      ],
+      hidden: [],
+      python: { choice: 'auto', venv: 'backend/.venv', auto: 'backend/.venv' },
+    });
+    await call(backend.id, 'hideCommand', { name: 'pytest' });
+    expect(await call(backend.id, 'list')).toMatchObject({
+      scripts: [{ name: 'main' }],
+      hidden: [{ name: 'pytest', command: 'python -m pytest' }],
+    });
+    await call(backend.id, 'showCommand', { name: 'pytest' });
+    expect(await call(backend.id, 'list')).toMatchObject({ hidden: [], scripts: [{ name: 'main' }, { name: 'pytest' }] });
+  });
+
+  it('runs detected and custom commands in the virtualenv', async () => {
+    const { call, platform, processes, backend } = await pythonSetup();
+    await call(backend.id, 'saveCommand', { name: 'seed', argv: ['python', 'tools/seed.py'] });
+    await call(backend.id, 'start', { script: 'main' });
+    await call(backend.id, 'start', { script: 'seed' });
+    const venv = join(tree, 'backend', '.venv');
+    for (const spawned of spawnCalls(platform)) {
+      expect(spawned).toMatchObject({ command: 'python', env: { VIRTUAL_ENV: venv, PYTHONUNBUFFERED: '1' } });
+      expect(spawned.env['PATH']?.split(delimiter)[0]).toBe(join(venv, 'bin'));
+    }
+    expect(processes.logs(backend.id, 'seed').lines.map((l) => l.text)).toContain('▸ virtualenv: backend/.venv');
+  });
+
+  it('uses the platform\'s python without a virtualenv, or when system Python is chosen', async () => {
+    const { call, platform, toolSettings, backend } = await pythonSetup();
+    await call(backend.id, 'setVenv', { mode: 'none' });
+    expect(toolSettings.get('p3/scripts')).toMatchObject({ venvs: [{ relPath: 'backend', venv: null }] });
+    expect(await call(backend.id, 'list')).toMatchObject({ python: { choice: 'none', venv: null } });
+    await call(backend.id, 'start', { script: 'main' });
+    expect(spawnCalls(platform)[0]).toMatchObject({ command: 'python3', args: ['main.py'] });
+    expect(spawnCalls(platform)[0]?.env['VIRTUAL_ENV']).toBeUndefined();
+  });
+
+  it('picks a virtualenv by path (it must hold pyvenv.cfg) and lists the project\'s', async () => {
+    const { call, platform, deps, backend } = await pythonSetup({ 'shared/env/pyvenv.cfg': '' });
+    expect(await call(backend.id, 'pythonEnvs')).toEqual({ envs: ['backend/.venv', 'shared/env'] });
+    deps.isFile.mockResolvedValueOnce(false);
+    await expect(call(backend.id, 'setVenv', { mode: 'path', path: 'nope' })).rejects.toMatchObject({ code: 'VALIDATION' });
+    await call(backend.id, 'setVenv', { mode: 'path', path: 'shared/env' });
+    await call(backend.id, 'start', { script: 'main' });
+    expect(spawnCalls(platform)[0]?.env['VIRTUAL_ENV']).toBe(join(tree, 'shared', 'env'));
+    await call(backend.id, 'setVenv', { mode: 'auto' });
+    expect(await call(backend.id, 'list')).toMatchObject({ python: { choice: 'auto' } });
+  });
+
+  it('offers the files a module can run, and no environment choice outside Python', async () => {
+    const { call, backend } = await pythonSetup();
+    expect(await call(backend.id, 'files')).toEqual({
+      files: [
+        { path: 'main.py', argv: ['python', 'main.py'] },
+        { path: 'tools/seed.py', argv: ['python', 'tools/seed.py'] },
+      ],
+    });
+    expect(await call('p3', 'files')).toEqual({ files: [] });
+    expect(await call('p3', 'list')).toMatchObject({ python: null, hidden: [] });
+    await expect(call('p3', 'setVenv', { mode: 'none' })).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 });

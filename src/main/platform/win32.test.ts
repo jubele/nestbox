@@ -267,6 +267,11 @@ describe('win32 other members', () => {
     expect(adapter.notificationAppId()).toBe('dev.nestbox.app');
   });
 
+  it('runs python and finds a virtualenv\'s Scripts folder', () => {
+    expect(adapter.pythonCommand).toBe('python');
+    expect(adapter.venvBinDir('C:\\Dev\\shop\\backend\\.venv')).toBe('C:\\Dev\\shop\\backend\\.venv\\Scripts');
+  });
+
   it('returns a copy of the inherited environment', async () => {
     const env = await adapter.resolveShellEnv();
     expect(env).toEqual(process.env);

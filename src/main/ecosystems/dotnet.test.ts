@@ -91,6 +91,7 @@ describe('dotnetModule', () => {
       };
       const ctx = {
         dir: '/test/dir',
+        rootDir: '/test/dir',
         platform: {} as PlatformAdapter,
         settings: {},
       };

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { NestboxError } from '@shared/errors';
 import type { Logger } from '../logger';
 import type { PlatformAdapter, PlatformDeps } from './adapter';
@@ -230,5 +230,10 @@ export function createDarwinAdapter(deps: PlatformDeps, extras: DarwinExtras = {
     notificationAppId: () => null,
 
     commandExists: async (command) => (await commandPath(command)) !== null,
+
+    // macOS has no `python` unless the user installed one; Apple's and Homebrew's are python3.
+    pythonCommand: 'python3',
+
+    venvBinDir: (venvPath) => posix.join(venvPath, 'bin'),
   };
 }

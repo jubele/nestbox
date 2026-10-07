@@ -37,8 +37,18 @@ const settingsSchema = z.object({
   main: z.array(RunGroupEntrySchema).max(200).default([]),
   /** Hidden detected commands (ecosystem tasks), can be restored. */
   hidden: z.record(z.string(), z.array(z.string())).optional().default({}),
+  /**
+   * The virtualenv a package's commands run in, where the user picked one: a posix path from the project
+   * folder, or an absolute path outside it; null = none (system Python). Absent = the module's default.
+   */
+  venvs: z
+    .array(z.object({ relPath: z.string(), venv: z.string().min(1).max(4096).nullable() }))
+    .max(200)
+    .default([]),
 });
 export type ScriptsSettings = z.infer<typeof settingsSchema>;
+
+export const VENV_MODES = ['auto', 'none', 'path'] as const;
 
 export const scriptsDefinition: ToolDefinition<ScriptsSettings> = {
   id: 'scripts',
@@ -100,6 +110,15 @@ export const scriptsContract = defineContract({
       packages: z.array(PackageScriptsSchema).nullable(),
       /** The package's env files right now, for the Env choice of each row. */
       envFiles: z.array(z.string()),
+      /** Detected commands the user hid in this package, to restore. */
+      hidden: z.array(z.object({ name: z.string(), command: z.string() })),
+      /**
+       * A Python package's environment (null elsewhere): the choice, the virtualenv in use and the one auto
+       * would use. Paths are posix from the project folder, or absolute; null = system Python.
+       */
+      python: z
+        .object({ choice: z.enum(VENV_MODES), venv: z.string().nullable(), auto: z.string().nullable() })
+        .nullable(),
     }),
   },
   start: { input: ScriptInput, output: ProcessSummarySchema },
@@ -165,6 +184,26 @@ export const scriptsContract = defineContract({
   hideCommand: { input: z.strictObject({ name: CommandName }), output: z.void() },
   /** Shows a hidden detected command. */
   showCommand: { input: z.strictObject({ name: CommandName }), output: z.void() },
+  /** Files the package's ecosystems offer to run (the Add command dialog's picker), with their argv. */
+  files: {
+    input: z.strictObject({}),
+    output: z.object({ files: z.array(z.object({ path: z.string(), argv: CommandArgvSchema })) }),
+  },
+  /** Virtualenvs inside the project (posix paths from the project folder), for the environment choice. */
+  pythonEnvs: { input: z.strictObject({}), output: z.object({ envs: z.array(z.string()) }) },
+  /** Which virtualenv a Python package's commands use: the default, none, or a path (VALIDATION without pyvenv.cfg). */
+  setVenv: {
+    input: z.strictObject({
+      mode: z.enum(VENV_MODES),
+      path: z
+        .string()
+        .min(1)
+        .max(4096)
+        .refine((p) => !p.includes('\0'))
+        .optional(),
+    }),
+    output: z.void(),
+  },
 });
 
 export const scriptsEvents = defineEvents({

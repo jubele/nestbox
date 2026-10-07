@@ -12,7 +12,7 @@ describe('scripts contract', () => {
   });
 
   it('defaults its settings', () => {
-    expect(scriptsDefinition.settingsSchema.parse({})).toEqual({ autoRestart: [], commands: [], envFiles: [], main: [], hidden: {} });
+    expect(scriptsDefinition.settingsSchema.parse({})).toEqual({ autoRestart: [], commands: [], envFiles: [], main: [], hidden: {}, venvs: [] });
   });
 
   it('bounds the export selection', () => {

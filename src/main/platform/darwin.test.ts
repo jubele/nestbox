@@ -144,6 +144,12 @@ describe('darwin adapter: running things', () => {
     expect(adapter.notificationAppId()).toBeNull();
   });
 
+  it('runs python3 and finds a virtualenv\'s bin folder', () => {
+    const { adapter } = setup();
+    expect(adapter.pythonCommand).toBe('python3');
+    expect(adapter.venvBinDir('/Users/me/shop/backend/.venv')).toBe('/Users/me/shop/backend/.venv/bin');
+  });
+
   it('compares paths case-insensitively', () => {
     const { adapter } = setup();
     expect(adapter.samePath('/Users/me/Shop/', '/users/me/shop')).toBe(true);

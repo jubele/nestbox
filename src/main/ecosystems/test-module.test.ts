@@ -44,6 +44,7 @@ describe('TEST_ECOSYSTEM_MODULE', () => {
       const info = { version: '1.0.0', marker: 'test-marker.txt' };
       const ctx = {
         dir: '/test/dir',
+        rootDir: '/test/dir',
         platform: {} as PlatformAdapter,
         settings: {},
       };

@@ -1,3 +1,4 @@
+import { win32 } from 'node:path';
 import { NestboxError } from '@shared/errors';
 import { type CommandRunner, type ExecResult, type PlatformAdapter, type PlatformDeps, type ProcessInfo } from './adapter';
 import { normalizeWin32Path } from './paths';
@@ -207,5 +208,9 @@ export function createWin32Adapter(deps: PlatformDeps): PlatformAdapter {
     notificationAppId: () => 'dev.nestbox.app',
 
     commandExists: (command) => commandExists(deps.runner, command),
+
+    pythonCommand: 'python',
+
+    venvBinDir: (venvPath) => win32.join(venvPath, 'Scripts'),
   };
 }
