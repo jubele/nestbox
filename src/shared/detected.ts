@@ -19,7 +19,7 @@ export interface DetectedCommand {
 }
 
 export interface PythonInfo {
-  /** The virtualenv folder ('.venv', 'venv', 'env'), or null when there is none. */
+  /** The virtualenv as a posix path from the package (`.venv`, or the project folder's `../.venv`), or null. */
   venv: string | null;
   framework: PythonFramework | null;
   /** The program is the bare 'python'; the scripts tool decides which interpreter that means. */

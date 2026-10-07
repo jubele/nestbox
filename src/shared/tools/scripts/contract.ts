@@ -24,7 +24,19 @@ const settingsSchema = z.object({
   autoRestart: z.array(RunGroupEntrySchema).max(500).default([]),
   /** Custom commands across the root and its workspace packages. */
   commands: z.array(CustomCommandSchema).max(100).default([]),
+  /** Detected commands the user removed (detection would find them again, so they are hidden). */
+  hidden: z.array(RunGroupEntrySchema).max(500).default([]),
+  /**
+   * The virtualenv a Python package's commands run in, where the user picked one: a posix path from the project
+   * folder, or an absolute path outside it; null = none (system Python). Absent = the detected one.
+   */
+  venvs: z
+    .array(z.object({ relPath: z.string(), venv: z.string().min(1).max(4096).nullable() }))
+    .max(200)
+    .default([]),
 });
+
+export const VENV_MODES = ['auto', 'none', 'path'] as const;
 export type ScriptsSettings = z.infer<typeof settingsSchema>;
 
 export const scriptsDefinition: ToolDefinition<ScriptsSettings> = {
@@ -79,6 +91,15 @@ export const scriptsContract = defineContract({
       runGroups: z.array(RunGroupSchema).nullable(),
       /** Root projects only: every package's scripts, for the run group editor. */
       packages: z.array(PackageScriptsSchema).nullable(),
+      /** Detected commands the user removed from this package, to restore. */
+      hidden: z.array(z.object({ name: z.string(), command: z.string() })),
+      /**
+       * A Python package's environment (null elsewhere). Paths are from the project folder (posix) or absolute;
+       * null = system Python.
+       */
+      python: z
+        .object({ choice: z.enum(VENV_MODES), venv: z.string().nullable(), auto: z.string().nullable() })
+        .nullable(),
     }),
   },
   start: { input: ScriptInput, output: ProcessSummarySchema },
@@ -109,6 +130,26 @@ export const scriptsContract = defineContract({
     input: z.strictObject({ previousName: CommandName.optional(), name: CommandName, argv: CommandArgvSchema }),
     output: z.void(),
   },
+  /** Removes a detected command from the package (it stays hidden until showCommand). */
+  hideCommand: { input: z.strictObject({ script: ScriptName }), output: z.void() },
+  showCommand: { input: z.strictObject({ script: ScriptName }), output: z.void() },
+  /** Virtualenvs inside the project (posix paths from the project folder), for the environment choice. */
+  pythonEnvs: { input: z.strictObject({}), output: z.object({ envs: z.array(z.string()) }) },
+  /** Which virtualenv the package's commands run in: the detected one, none, or a path (VALIDATION without pyvenv.cfg). */
+  setVenv: {
+    input: z.strictObject({
+      mode: z.enum(VENV_MODES),
+      path: z
+        .string()
+        .min(1)
+        .max(4096)
+        .refine((p) => !p.includes('\0'))
+        .optional(),
+    }),
+    output: z.void(),
+  },
+  /** The package's .py files (posix paths, three levels deep at most), for "run a Python file". */
+  pythonFiles: { input: z.strictObject({}), output: z.object({ files: z.array(z.string()) }) },
   deleteCommand: { input: z.strictObject({ name: CommandName }), output: z.void() },
   saveRunGroup: {
     input: z.strictObject({ previousName: GroupName.optional(), group: RunGroupSchema }),

@@ -65,7 +65,15 @@ export function CommandPalette() {
   const entries = useMemo(
     () =>
       open
-        ? paletteEntries({ projects, selected, processes, runGroups: list?.runGroups ?? [], tools, claudeOn })
+        ? paletteEntries({
+            projects,
+            selected,
+            processes,
+            runGroups: list?.runGroups ?? [],
+            runnables: list?.packages ?? [],
+            tools,
+            claudeOn,
+          })
         : [],
     [open, projects, selected, processes, list, tools, claudeOn],
   );

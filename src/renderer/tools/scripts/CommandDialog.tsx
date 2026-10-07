@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { splitCommandLine } from '@shared/command-line';
+import { formatCommandLine, splitCommandLine } from '@shared/command-line';
 import { COMMAND_NAME } from '@shared/detected';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,7 +11,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { useCommandActions } from './use-scripts';
+import { useCommandActions, usePythonFiles } from './use-scripts';
+
+/** A command name from a file path: `app/run server.py` → `run-server`. */
+function nameFromFile(path: string): string {
+  const stem = (path.split('/').pop() ?? path).replace(/\.py$/, '');
+  return stem
+    .replace(/[^A-Za-z0-9:._-]+/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .slice(0, 60);
+}
 
 /** Adds a custom command to a package, or edits one (`initial`). Mounted only while open. */
 export function CommandDialog({
@@ -27,6 +36,15 @@ export function CommandDialog({
   const { save } = useCommandActions(projectId);
   const [name, setName] = useState(initial?.name ?? '');
   const [line, setLine] = useState(initial?.command ?? '');
+  const { data: python } = usePythonFiles(projectId);
+  const [pickedFile, setPickedFile] = useState('');
+  const pickFile = (file: string) => {
+    setPickedFile(file);
+    if (file === '') return;
+    setLine(formatCommandLine(['python', file]));
+    // The name follows the file until the user types one.
+    if (name === '' || name === nameFromFile(pickedFile)) setName(nameFromFile(file));
+  };
   const nameError =
     name !== '' && !COMMAND_NAME.test(name)
       ? 'Use letters, digits, ":", ".", "_" or "-" (up to 60).'
@@ -56,6 +74,24 @@ export function CommandDialog({
             );
           }}
         >
+          {python && python.files.length > 0 && (
+            <label className="block space-y-1 text-xs text-fg-muted">
+              <span>Run a Python file</span>
+              <select
+                aria-label="Python file"
+                value={pickedFile}
+                onChange={(e) => pickFile(e.target.value)}
+                className="h-8 w-full rounded-md border border-line bg-app px-2 font-mono text-xs text-fg"
+              >
+                <option value="">Choose a file…</option>
+                {python.files.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block space-y-1 text-xs text-fg-muted">
             <span>Name</span>
             <Input

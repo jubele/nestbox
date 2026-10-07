@@ -51,26 +51,22 @@ describe('paletteEntries', () => {
     expect(entries.find((e) => e.label === 'Run dev in blog')?.detail).toBe('vite');
   });
 
-  it('runs detected Python commands too, unless a package.json script has the name', () => {
-    const backend = makeDetected({
-      id: 'p3::backend',
-      rootId: 'p3',
-      relPath: 'backend',
-      name: 'backend',
-      packageJson: { scripts: { migrate: 'echo' } },
-      python: {
-        venv: null,
-        framework: 'django',
-        commands: [
-          { name: 'runserver', argv: ['python', 'manage.py', 'runserver'] },
-          { name: 'migrate', argv: ['python', 'manage.py', 'migrate'] },
+  it("runs the selected project's commands from the Scripts tool's list, never removed ones", () => {
+    const entries = paletteEntries(
+      input({
+        runnables: [
+          { relPath: '', scripts: ['dev', 'build', 'seed'] },
+          // 'runserver' was detected but removed: it isn't in the list.
+          { relPath: 'packages/api', scripts: ['start', 'worker'] },
         ],
-      },
-    });
-    const app = makeSummary({ id: 'p3', name: 'app', detected: makeDetected({ id: 'p3', rootId: 'p3', name: 'app', packageJson: null, workspaces: [backend] }) });
-    const entries = paletteEntries(input({ projects: [app] }));
-    expect(entries.find((e) => e.label === 'Run runserver in app › backend')?.detail).toBe('python manage.py runserver');
-    expect(entries.filter((e) => e.id === 'script:p3::backend:migrate').map((e) => e.detail)).toEqual(['echo']);
+      }),
+    );
+    expect(entries.find((e) => e.label === 'Run seed in shop')?.action).toEqual({ kind: 'script', projectId: 'p1', script: 'seed', op: 'start' });
+    expect(entries.find((e) => e.label === 'Run worker in shop › @shop/api')?.detail).toBe('command');
+    // A package.json script keeps its own entry (and text), once.
+    expect(entries.filter((e) => e.id === 'script:p1:dev').map((e) => e.detail)).toEqual(['vite']);
+    // Other projects' commands aren't known: only their package.json scripts.
+    expect(labels(entries, 'Scripts').filter((l) => l.endsWith('in blog'))).toEqual(['Run dev in blog', 'Run build in blog']);
   });
 
   it('starts run groups, and stops one with a live entry in a workspace package', () => {

@@ -6,8 +6,12 @@ import { renderWithProviders } from '@/test/render';
 import { CommandDialog } from './CommandDialog';
 import { installScriptsBridge } from './test-bridge';
 
-function open(initial: { name: string; command: string } | null = null, methods = {}) {
-  const fx = installScriptsBridge({ methods });
+function open(
+  initial: { name: string; command: string } | null = null,
+  methods = {},
+  pythonFiles: string[] = [],
+) {
+  const fx = installScriptsBridge({ methods, pythonFiles });
   const onOpenChange = vi.fn();
   renderWithProviders(
     <CommandDialog projectId="p1::backend" initial={initial} onOpenChange={onOpenChange} />,
@@ -79,5 +83,27 @@ describe('CommandDialog', () => {
       await screen.findByText('This package already has a script or command with this name'),
     ).toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it('fills the command from a Python file', async () => {
+    const { callsTo } = open(null, {}, ['server.py', 'app/run server.py']);
+    const picker = await screen.findByRole('combobox', { name: 'Python file' });
+    await userEvent.selectOptions(picker, 'app/run server.py');
+    expect(screen.getByRole('textbox', { name: 'Command' })).toHaveValue(
+      'python "app/run server.py"',
+    );
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('run-server');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(callsTo('saveCommand')).toEqual([
+        { name: 'run-server', argv: ['python', 'app/run server.py'] },
+      ]),
+    );
+  });
+
+  it('offers no Python file picker without Python files', async () => {
+    open({ name: 'api', command: 'node api.js' });
+    expect(await screen.findByRole('textbox', { name: 'Name' })).toHaveValue('api');
+    expect(screen.queryByRole('combobox', { name: 'Python file' })).toBeNull();
   });
 });

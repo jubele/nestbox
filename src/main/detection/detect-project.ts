@@ -6,7 +6,7 @@ import { isRecord } from '@shared/is-record';
 import { isDirectory, isFile } from './fs-utils';
 import { readGitInfo } from './git-head';
 import { detectPackageManager } from './package-manager';
-import { detectPython } from './python';
+import { detectPython, findVenvIn } from './python';
 import { findWorkspaceDirs } from './workspaces';
 
 export type DetectWarning = 'unreadable' | 'invalid-json' | 'not-an-object' | 'invalid-yaml' | 'outside-root';
@@ -205,5 +205,16 @@ export async function detectProject(
       return detected;
     }),
   );
-  return { ...root, workspaces };
+  // A Python package without its own virtualenv uses the project folder's (backend/ → ../.venv).
+  const rootVenv = await findVenvIn(input.path);
+  return {
+    ...root,
+    workspaces: rootVenv === null ? workspaces : workspaces.map((w) => inheritVenv(w, rootVenv)),
+  };
+}
+
+function inheritVenv(pkg: DetectedProject, rootVenv: string): DetectedProject {
+  if (pkg.python === null || pkg.python.venv !== null) return pkg;
+  const up = '../'.repeat(pkg.relPath.split('/').length);
+  return { ...pkg, python: { ...pkg.python, venv: `${up}${rootVenv}` } };
 }

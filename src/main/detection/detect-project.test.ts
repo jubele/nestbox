@@ -57,6 +57,26 @@ describe('detectProject', () => {
     expect(d.workspaces[1]?.python).toBeNull();
   });
 
+  it("gives a Python package without a virtualenv the project folder's", async () => {
+    dir = await makeTree({
+      '.venv/pyvenv.cfg': '',
+      'frontend/package.json': '{}',
+      'backend/main.py': 'x = 1\n',
+      'services/worker/requirements.txt': '',
+      'tools-api/main.py': '',
+      'tools-api/venv/pyvenv.cfg': '',
+    });
+    const d = await detectProject({ id: 'p', path: dir });
+    const venvOf = (rel: string) => d.workspaces.find((w) => w.relPath === rel)?.python?.venv;
+    expect(venvOf('backend')).toBe('../.venv');
+    expect(venvOf('services/worker')).toBe('../../.venv');
+    // Its own virtualenv wins.
+    expect(venvOf('tools-api')).toBe('venv');
+    expect(d.workspaces.find((w) => w.relPath === 'frontend')?.python).toBeNull();
+    // The root itself has no Python files: no Python info.
+    expect(d.python).toBeNull();
+  });
+
   it('parses package.json with a UTF-8 BOM', async () => {
     dir = await makeTree({ 'package.json': '﻿{"name":"bom"}' });
     expect((await detectProject({ id: 'p', path: dir })).packageJson?.name).toBe('bom');

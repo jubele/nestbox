@@ -1,4 +1,4 @@
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatCommandLine } from '@shared/command-line';
 import { type DetectedProject, workspaceId } from '@shared/detected';
@@ -20,6 +20,8 @@ import type { ProcessManager, StartRequest } from '../../processes/process-manag
 import type { SharedContext } from '../shared-context';
 import { type AnyMainTool, defineMainTool, type ToolContext } from '../types';
 import { exportFileName, formatExport } from './export';
+import { findProjectVenvs } from './python-envs';
+import { listPythonFiles } from './python-files';
 import { createLogBatcher } from './log-batcher';
 
 export interface ScriptsToolDeps {
@@ -66,6 +68,11 @@ interface Runnable {
   argv: string[] | null;
 }
 
+const isEntry =
+  (relPath: string, script: string | undefined) =>
+  (e: RunGroupEntry): boolean =>
+    e.relPath === relPath && e.script === script;
+
 /**
  * A package's runnables in display order: package.json scripts, detected commands, custom commands. Names
  * are unique: on a clash package.json wins, then the user's command, then detection.
@@ -83,31 +90,63 @@ function runnables(project: DetectedProject, settings: ScriptsSettings): Runnabl
   const taken = new Set(npm.map((r) => r.name));
   const unique = (r: Runnable): boolean => !taken.has(r.name) && Boolean(taken.add(r.name));
   const custom = settings.commands.filter((c) => c.relPath === project.relPath).map(asRunnable('custom')).filter(unique);
-  const detected = (project.python?.commands ?? []).map(asRunnable('detected')).filter(unique);
+  const detected = (project.python?.commands ?? [])
+    .filter((c) => !settings.hidden.some(isEntry(project.relPath, c.name)))
+    .map(asRunnable('detected'))
+    .filter(unique);
   return [...npm, ...detected, ...custom];
 }
 
+/** Detected commands the user removed, unless something else now has the name. */
+function hiddenOf(project: DetectedProject, settings: ScriptsSettings): { name: string; command: string }[] {
+  const names = new Set(runnables(project, settings).map((r) => r.name));
+  return (project.python?.commands ?? [])
+    .filter((c) => settings.hidden.some(isEntry(project.relPath, c.name)) && !names.has(c.name))
+    .map((c) => ({ name: c.name, command: formatCommandLine(c.argv) }));
+}
+
+/** A path for display and storage: posix from the project folder when inside it, else absolute as is. */
+function fromRoot(rootPath: string, abs: string): string {
+  const rel = relative(rootPath, abs);
+  if (rel === '') return '.';
+  return rel.startsWith('..') || isAbsolute(rel) ? abs : rel.split(sep).join('/');
+}
+
+/** A stored or typed path: from the project folder unless absolute. */
+const resolveFromRoot = (rootPath: string, path: string): string =>
+  isAbsolute(path) ? path : join(rootPath, ...path.split(/[\\/]/));
+
+/** Which virtualenv a Python package's commands use: absolute path or null, and whether the user chose it. */
+type VenvUse = { venv: string | null; chosen: boolean };
+
 /**
  * How a command line runs in a package. With Python: unbuffered UTF-8 output and the virtualenv first on
- * PATH; without a virtualenv, `python` becomes the platform's interpreter (macOS has only python3).
+ * PATH; without one, `python` becomes the platform's interpreter (macOS has only python3).
  */
 function commandRun(
   project: DetectedProject,
   argv: string[],
   platform: Pick<PlatformAdapter, 'pythonCommand' | 'venvBinDir'>,
+  use: VenvUse & { label: string | null },
 ): Pick<StartRequest, 'argv' | 'env' | 'pathPrepend' | 'note'> {
   if (project.python === null) return { argv };
   const env = { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' };
-  if (project.python.venv !== null) {
-    const venv = join(project.path, project.python.venv);
-    return { argv, env: { ...env, VIRTUAL_ENV: venv }, pathPrepend: platform.venvBinDir(venv) };
+  if (use.venv !== null) {
+    return {
+      argv,
+      env: { ...env, VIRTUAL_ENV: use.venv },
+      pathPrepend: platform.venvBinDir(use.venv),
+      note: `▸ virtualenv: ${use.label ?? use.venv}`,
+    };
   }
   const [program, ...args] = argv;
   if (program !== 'python') return { argv, env };
   return {
     argv: [platform.pythonCommand, ...args],
     env,
-    note: `▸ No virtualenv (.venv) found: using ${platform.pythonCommand} from PATH`,
+    note: use.chosen
+      ? `▸ System Python chosen: using ${platform.pythonCommand} from PATH`
+      : `▸ No virtualenv (.venv) found: using ${platform.pythonCommand} from PATH`,
   };
 }
 
@@ -137,6 +176,19 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
     }
     for (const [projectId, facts] of byProject) deps.shared.forProject(projectId).publish(PROCESSES_FACT, facts);
     published = new Set(byProject.keys());
+  }
+
+  /** The project folder (the root package's path). */
+  const rootPathOf = (project: DetectedProject): string =>
+    project.relPath === '' ? project.path : deps.getDetected(project.rootId).path;
+
+  const autoVenv = (project: DetectedProject): string | null =>
+    project.python?.venv ? join(project.path, ...project.python.venv.split('/')) : null;
+
+  function venvUse(settings: ScriptsSettings, project: DetectedProject): VenvUse {
+    const choice = settings.venvs.find((v) => v.relPath === project.relPath);
+    if (!choice) return { venv: autoVenv(project), chosen: false };
+    return { venv: choice.venv === null ? null : resolveFromRoot(rootPathOf(project), choice.venv), chosen: true };
   }
 
   const findRunnable = (project: DetectedProject, settings: ScriptsSettings, name: string): Runnable | null =>
@@ -172,19 +224,38 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
     }
   }
 
+  function runCommand(ctx: Ctx, settings: ScriptsSettings, project: DetectedProject, argv: string[]) {
+    const use = venvUse(settings, project);
+    const label = use.venv === null || project.python === null ? null : fromRoot(rootPathOf(project), use.venv);
+    return commandRun(project, argv, ctx.platform, { ...use, label });
+  }
+
+  function pythonChoice(settings: ScriptsSettings, project: DetectedProject) {
+    if (project.python === null) return null;
+    const root = rootPathOf(project);
+    const choice = settings.venvs.find((v) => v.relPath === project.relPath);
+    const auto = autoVenv(project);
+    const { venv } = venvUse(settings, project);
+    return {
+      choice: choice === undefined ? ('auto' as const) : choice.venv === null ? ('none' as const) : ('path' as const),
+      venv: venv === null ? null : fromRoot(root, venv),
+      auto: auto === null ? null : fromRoot(root, auto),
+    };
+  }
+
   /** The Node tool is asked only about package.json scripts. */
   const requestFor = async (
     ctx: Ctx,
+    settings: ScriptsSettings,
     project: DetectedProject,
     runnable: Runnable,
-    autoRestart: boolean,
   ): Promise<StartRequest> => ({
     projectId: project.id,
     script: runnable.name,
     cwd: project.path,
     packageManager: project.packageManager,
-    autoRestart,
-    ...(runnable.argv === null ? await adviceFor(project.id) : commandRun(project, runnable.argv, ctx.platform)),
+    autoRestart: isAuto(settings, project, runnable.name),
+    ...(runnable.argv === null ? await adviceFor(project.id) : runCommand(ctx, settings, project, runnable.argv)),
   });
 
   function requireRoot(project: DetectedProject): void {
@@ -273,20 +344,22 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
           autoRestart: isAuto(settings, ctx.project, name),
           kind,
         }));
-        if (ctx.project.relPath !== '') return { scripts, runGroups: null, packages: null };
+        const hidden = hiddenOf(ctx.project, settings);
+        const python = pythonChoice(settings, ctx.project);
+        if (ctx.project.relPath !== '') return { scripts, runGroups: null, packages: null, hidden, python };
         const packages = [ctx.project, ...ctx.project.workspaces].map((p) => ({
           relPath: p.relPath,
           name: p.name,
           scripts: runnables(p, settings).map((r) => r.name),
           compose: p.dockerCompose !== null,
         }));
-        return { scripts, runGroups: deps.runGroups.get(ctx.project.rootId), packages };
+        return { scripts, runGroups: deps.runGroups.get(ctx.project.rootId), packages, hidden, python };
       },
 
       start: async (ctx: Ctx, { script }) => {
         const settings = ctx.settings.get();
         const runnable = requireRunnable(ctx.project, settings, script);
-        return deps.processes.start(await requestFor(ctx, ctx.project, runnable, isAuto(settings, ctx.project, script)));
+        return deps.processes.start(await requestFor(ctx, settings, ctx.project, runnable));
       },
 
       stop: async (ctx: Ctx, { script }) => deps.processes.stop(ctx.project.id, script),
@@ -294,7 +367,7 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
       restart: async (ctx: Ctx, { script }) => {
         const settings = ctx.settings.get();
         const runnable = requireRunnable(ctx.project, settings, script);
-        return deps.processes.restart(await requestFor(ctx, ctx.project, runnable, isAuto(settings, ctx.project, script)));
+        return deps.processes.restart(await requestFor(ctx, settings, ctx.project, runnable));
       },
 
       setAutoRestart: async (ctx: Ctx, { script, enabled }) => {
@@ -385,6 +458,48 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
         }));
       },
 
+      hideCommand: async (ctx: Ctx, { script }) => {
+        const runnable = requireRunnable(ctx.project, ctx.settings.get(), script);
+        if (runnable.kind !== 'detected') throw new NestboxError('NOT_FOUND', 'Only detected commands can be removed this way');
+        if (isRunning(ctx.project.id, script)) throw new NestboxError('CONFLICT', 'Stop the command before removing it');
+        const { relPath } = ctx.project;
+        ctx.settings.update((s) => ({ ...s, hidden: [...s.hidden.filter((e) => !isEntry(relPath, script)(e)), { relPath, script }] }));
+      },
+
+      showCommand: async (ctx: Ctx, { script }) => {
+        const { relPath } = ctx.project;
+        if (!ctx.settings.get().hidden.some(isEntry(relPath, script))) throw new NestboxError('NOT_FOUND', 'Unknown command');
+        ctx.settings.update((s) => ({ ...s, hidden: s.hidden.filter((e) => !isEntry(relPath, script)(e)) }));
+      },
+
+      pythonEnvs: async (ctx: Ctx) => ({ envs: await findProjectVenvs(rootPathOf(ctx.project)).catch(() => []) }),
+
+      setVenv: async (ctx: Ctx, { mode, path }) => {
+        if (ctx.project.python === null) throw new NestboxError('VALIDATION', 'Not a Python package');
+        const { relPath } = ctx.project;
+        let venv: string | null = null;
+        if (mode === 'path') {
+          if (path === undefined) throw new NestboxError('VALIDATION', 'Choose a virtualenv folder');
+          const root = rootPathOf(ctx.project);
+          const abs = resolveFromRoot(root, path.trim());
+          if (!(await deps.isFile(join(abs, 'pyvenv.cfg')))) {
+            throw new NestboxError('VALIDATION', 'Not a virtualenv: that folder has no pyvenv.cfg');
+          }
+          venv = fromRoot(root, abs);
+        }
+        ctx.settings.update((s) => ({
+          ...s,
+          venvs: [
+            ...s.venvs.filter((v) => v.relPath !== relPath),
+            ...(mode === 'auto' ? [] : [{ relPath, venv }]),
+          ],
+        }));
+      },
+
+      pythonFiles: async (ctx: Ctx) => ({
+        files: ctx.project.python === null ? [] : await listPythonFiles(ctx.project.path),
+      }),
+
       saveRunGroup: async (ctx: Ctx, { previousName, group }) => {
         requireRoot(ctx.project);
         const groups = deps.runGroups.get(ctx.project.rootId);
@@ -426,7 +541,7 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
             const { project, runnable } = resolved;
             try {
               started.push(
-                await deps.processes.start(await requestFor(ctx, project, runnable, isAuto(settings, project, entry.script))),
+                await deps.processes.start(await requestFor(ctx, settings, project, runnable)),
               );
             } catch (error) {
               if (error instanceof NestboxError && error.code === 'CONFLICT') {

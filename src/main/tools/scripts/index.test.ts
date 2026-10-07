@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { delimiter, posix, resolve } from 'node:path';
+import { delimiter, join, posix, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DetectedProject } from '@shared/detected';
 import { NestboxError } from '@shared/errors';
@@ -112,6 +112,8 @@ describe('scripts tool: list and lifecycle', () => {
         { relPath: '', name: 'shop', scripts: ['dev', 'build'], compose: false },
         { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false },
       ],
+      hidden: [],
+      python: null,
     });
   });
 
@@ -146,11 +148,11 @@ describe('scripts tool: list and lifecycle', () => {
     const { call, toolSettings, processes } = setup();
     await call(api.id, 'start', { script: 'dev' });
     expect(await call(api.id, 'setAutoRestart', { script: 'dev', enabled: true })).toEqual({ enabled: true });
-    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [{ relPath: 'packages/api', script: 'dev' }], commands: [] });
+    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [{ relPath: 'packages/api', script: 'dev' }], commands: [], hidden: [], venvs: [] });
     expect(processes.get(api.id, 'dev')?.autoRestart).toBe(true);
     expect(await call(api.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', autoRestart: true }] });
     await call(api.id, 'setAutoRestart', { script: 'dev', enabled: false });
-    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [], commands: [] });
+    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [], commands: [], hidden: [], venvs: [] });
   });
 
   it('starts with auto-restart from settings', async () => {
@@ -500,6 +502,8 @@ describe('scripts tool: Python and custom commands', () => {
       ],
       runGroups: null,
       packages: null,
+      hidden: [],
+      python: { choice: 'auto', venv: 'backend/.venv', auto: 'backend/.venv' },
     });
     expect(await call('r2', 'list')).toMatchObject({
       scripts: [],
@@ -626,5 +630,98 @@ describe('scripts tool: Python and custom commands', () => {
         [resolve(APP, 'frontend'), 'pnpm', 'run', 'dev'],
       ]),
     );
+  });
+});
+
+describe('scripts tool: Python files', () => {
+  it('lists Python files only in a Python package', async () => {
+    const { call } = pythonSetup();
+    expect(await call(frontend.id, 'pythonFiles')).toEqual({ files: [] });
+    // BACKEND doesn't exist on disk: an empty list, not an error.
+    expect(await call(backend.id, 'pythonFiles')).toEqual({ files: [] });
+  });
+});
+
+describe('scripts tool: removing detected commands', () => {
+  it('hides a detected command from the list, run groups and starts, and restores it', async () => {
+    const { call, setGroups } = pythonSetup();
+    setGroups([{ name: 'dev', entries: [{ relPath: 'backend', script: 'dev' }], compose: [] }]);
+    await call(backend.id, 'hideCommand', { script: 'dev' });
+    expect(await call(backend.id, 'list')).toMatchObject({
+      scripts: [],
+      hidden: [{ name: 'dev', command: 'python -m uvicorn main:app --reload' }],
+    });
+    expect(await call('r2', 'list')).toMatchObject({ packages: [{ relPath: '' }, { relPath: 'backend', scripts: [] }, { relPath: 'frontend' }] });
+    await expect(call(backend.id, 'start', { script: 'dev' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await call('r2', 'startRunGroup', { name: 'dev' })).toMatchObject({ skipped: [{ relPath: 'backend', script: 'dev', reason: 'missing' }] });
+    await call(backend.id, 'showCommand', { script: 'dev' });
+    expect(await call(backend.id, 'list')).toMatchObject({ scripts: [{ name: 'dev' }], hidden: [] });
+  });
+
+  it('hides only detected commands, never while they run', async () => {
+    const { call } = pythonSetup();
+    await expect(call(frontend.id, 'hideCommand', { script: 'dev' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await call(backend.id, 'start', { script: 'dev' });
+    await expect(call(backend.id, 'hideCommand', { script: 'dev' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(call(backend.id, 'showCommand', { script: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('lets a custom command take the name of a hidden one', async () => {
+    const { call } = pythonSetup();
+    await call(backend.id, 'hideCommand', { script: 'dev' });
+    await call(backend.id, 'saveCommand', { name: 'dev', argv: ['python', 'server.py'] });
+    expect(await call(backend.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', kind: 'custom' }], hidden: [] });
+  });
+});
+
+describe('scripts tool: Python environment', () => {
+  const venvOf = (platform: ReturnType<typeof fakePlatform>, i = 0) => spawnCalls(platform)[i]?.env['VIRTUAL_ENV'];
+
+  it('runs in the detected virtualenv by default, including the project folder\'s', async () => {
+    const inherited = {
+      ...backend,
+      python: { venv: '../.venv', framework: 'fastapi' as const, commands: backend.python?.commands ?? [] },
+    };
+    const { call, platform, processes } = pythonSetup(inherited);
+    expect(await call(backend.id, 'list')).toMatchObject({ python: { choice: 'auto', venv: '.venv', auto: '.venv' } });
+    await call(backend.id, 'start', { script: 'dev' });
+    expect(venvOf(platform)).toBe(resolve(APP, '.venv'));
+    expect(processes.logs(backend.id, 'dev').lines.map((l) => l.text)).toContain('▸ virtualenv: .venv');
+  });
+
+  it('picks another virtualenv by path (stored from the project folder), or none', async () => {
+    const { call, platform, deps, toolSettings } = pythonSetup();
+    await call(backend.id, 'setVenv', { mode: 'path', path: 'tools/.venv' });
+    expect(deps.isFile).toHaveBeenCalledWith(join(resolve(APP, 'tools', '.venv'), 'pyvenv.cfg'));
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ venvs: [{ relPath: 'backend', venv: 'tools/.venv' }] });
+    expect(await call(backend.id, 'list')).toMatchObject({ python: { choice: 'path', venv: 'tools/.venv', auto: 'backend/.venv' } });
+    await call(backend.id, 'start', { script: 'dev' });
+    expect(venvOf(platform)).toBe(resolve(APP, 'tools', '.venv'));
+    await call(backend.id, 'stop', { script: 'dev' });
+
+    await call(backend.id, 'setVenv', { mode: 'none' });
+    await call(backend.id, 'start', { script: 'dev' });
+    expect(venvOf(platform, 1)).toBeUndefined();
+    expect(spawnCalls(platform)[1]?.command).toBe('python3');
+    await call(backend.id, 'stop', { script: 'dev' });
+
+    await call(backend.id, 'setVenv', { mode: 'auto' });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ venvs: [] });
+  });
+
+  it('keeps a virtualenv outside the project as an absolute path', async () => {
+    const { call } = pythonSetup();
+    const outside = resolve('/opt/envs/api');
+    await call(backend.id, 'setVenv', { mode: 'path', path: outside });
+    expect(await call(backend.id, 'list')).toMatchObject({ python: { choice: 'path', venv: outside } });
+  });
+
+  it('refuses a folder without pyvenv.cfg, a missing path and a package without Python', async () => {
+    const { call, deps } = pythonSetup();
+    deps.isFile.mockResolvedValueOnce(false);
+    await expect(call(backend.id, 'setVenv', { mode: 'path', path: 'nope' })).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(call(backend.id, 'setVenv', { mode: 'path' })).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(call(frontend.id, 'setVenv', { mode: 'none' })).rejects.toMatchObject({ code: 'VALIDATION' });
+    expect(await call(frontend.id, 'list')).toMatchObject({ python: null });
   });
 });

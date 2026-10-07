@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useUiStore } from '@/state/ui-store';
 import type { ScriptInfo, ScriptKind } from '@shared/tools/scripts/contract';
 import { CommandDialog } from './CommandDialog';
+import { PythonEnvPicker } from './PythonEnvPicker';
 import { useCommandActions, useScriptAction, useScriptList, useSetAutoRestart } from './use-scripts';
 
 const BADGES: Partial<Record<ProcessSummary['state'], string>> = {
@@ -46,12 +47,14 @@ function ScriptRow({
   process,
   onEdit,
   onDelete,
+  onHide,
 }: {
   projectId: string;
   info: ScriptInfo;
   process: ProcessSummary | undefined;
   onEdit(): void;
   onDelete(): void;
+  onHide(): void;
 }) {
   const action = useScriptAction(projectId);
   const setAutoRestart = useSetAutoRestart(projectId);
@@ -93,6 +96,18 @@ function ScriptRow({
           </span>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {info.kind === 'detected' && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Remove ${info.name}`}
+              title="Remove this detected command (you can restore it below)"
+              disabled={live}
+              onClick={onHide}
+            >
+              <Trash2 />
+            </Button>
+          )}
           {info.kind === 'custom' && (
             <>
               <Button variant="ghost" size="icon" aria-label={`Edit ${info.name}`} onClick={onEdit}>
@@ -182,6 +197,7 @@ export function ScriptList({ projectId }: { projectId: string }) {
           Add command
         </Button>
       </div>
+      {data.python && <PythonEnvPicker projectId={projectId} python={data.python} />}
       {data.scripts.length === 0 && <p className="text-xs text-fg-faint">No scripts or commands yet.</p>}
       <ul className="space-y-1.5">
         {data.scripts.map((info) => (
@@ -192,9 +208,30 @@ export function ScriptList({ projectId }: { projectId: string }) {
             process={processes.find((p) => p.projectId === projectId && p.script === info.name)}
             onEdit={() => setEditing(info)}
             onDelete={() => setDeleting(info.name)}
+            onHide={() => commands.hide.mutate(info.name)}
           />
         ))}
       </ul>
+      {data.hidden.length > 0 && (
+        <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-fg-muted">
+          <span>Removed:</span>
+          {data.hidden.map((h) => (
+            <span key={h.name} className="inline-flex items-center gap-1" title={h.command}>
+              <span className="font-mono">{h.name}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1.5 text-[11px]"
+                aria-label={`Restore ${h.name}`}
+                disabled={commands.show.isPending}
+                onClick={() => commands.show.mutate(h.name)}
+              >
+                Restore
+              </Button>
+            </span>
+          ))}
+        </p>
+      )}
       {editing !== null && (
         <CommandDialog
           projectId={projectId}

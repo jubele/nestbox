@@ -331,6 +331,7 @@ Many projects pair a React (or other Node) frontend with a Python backend. NestB
 - Detected commands: Django (`runserver`, `migrate`), a module-level FastAPI app (`python -m uvicorn <module>:<app> --reload`), a Flask app (`python -m flask --app <module> run --debug`), else each script with a `__main__` guard.
 - Custom commands for any package: a program and its arguments, run without a shell.
 - A local virtualenv (`.venv`, `venv`, `env`) goes first on PATH with `VIRTUAL_ENV` set; output is unbuffered UTF-8. Without one, `python` is the platform's (`python3` on macOS).
+- A `.py` file picker for custom commands. Detected commands can be removed (hidden, with Restore). A package without its own virtualenv uses the project folder's, and the Scripts tab can pick another (one found in the project, a folder anywhere, or system Python).
 - Later: uv/poetry runners, `[tool.poe]`/`[tool.pdm]` tasks, `.python-version` checks, pip-audit.
 
 ## Data model and persistence

@@ -65,7 +65,47 @@ export function useCommandActions(projectId: string) {
     onSuccess: refresh,
     onError: showError,
   });
-  return { save, remove };
+  /** A detected command: hidden, since detection would find it again. */
+  const hide = useMutation({
+    mutationFn: (script: string) => api.tools.invoke('scripts', projectId, 'hideCommand', { script }),
+    onSuccess: refresh,
+    onError: showError,
+  });
+  const show = useMutation({
+    mutationFn: (script: string) => api.tools.invoke('scripts', projectId, 'showCommand', { script }),
+    onSuccess: refresh,
+    onError: showError,
+  });
+  return { save, remove, hide, show };
+}
+
+/** The package's .py files, for "run a Python file" (empty outside Python packages). */
+export function usePythonFiles(projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.tool('scripts', projectId, 'pythonFiles'),
+    queryFn: () => api.tools.invoke('scripts', projectId, 'pythonFiles', {}),
+    staleTime: 30_000,
+  });
+}
+
+/** Virtualenvs inside the project, for the Python environment choice. */
+export function usePythonEnvs(projectId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.tool('scripts', projectId, 'pythonEnvs'),
+    queryFn: () => api.tools.invoke('scripts', projectId, 'pythonEnvs', {}),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
+export function useSetVenv(projectId: string) {
+  const refresh = useRefreshAfter(projectId);
+  return useMutation({
+    mutationFn: (input: { mode: 'auto' | 'none' | 'path'; path?: string }) =>
+      api.tools.invoke('scripts', projectId, 'setVenv', input),
+    onSettled: refresh,
+    onError: showError,
+  });
 }
 
 export function useRunGroupActions(projectId: string) {

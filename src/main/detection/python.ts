@@ -57,6 +57,11 @@ async function findVenv(dir: string, dirs: ReadonlySet<string>): Promise<string 
   return null;
 }
 
+/** The virtualenv folder directly in dir (`.venv`, `venv`, `env` holding a pyvenv.cfg), or null. */
+export async function findVenvIn(dir: string): Promise<string | null> {
+  return findVenv(dir, new Set(VENV_DIRS));
+}
+
 /** A FastAPI or Flask app defined at module level in one of the entry files. */
 async function findApp(
   dir: string,
