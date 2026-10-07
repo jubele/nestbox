@@ -38,6 +38,39 @@ describe('findEnvKeys', () => {
     ].join('\n');
     expect(findEnvKeys(text)).toEqual(['API_URL', 'STRIPE_KEY', 'VITE_API_BASE']);
   });
+
+  it('finds TypeScript destructuring, optional chaining, Bun and Deno', () => {
+    const text = [
+      'const { DATABASE_URL, PORT: port = "3000", JWT_SECRET } = process.env;',
+      'const {',
+      '  REDIS_URL,',
+      '  // a comment',
+      '  SMTP_HOST = "localhost",',
+      '  ...rest',
+      '} = process.env as Record<string, string>;',
+      'const a = process.env?.SENTRY_DSN ?? "";',
+      "const b = process.env?.['S3_BUCKET'];",
+      'const c = process.env!.AWS_REGION;',
+      'const d = Bun.env.BUN_KEY;',
+      'const e = Deno.env.get("DENO_KEY");',
+      'const { VITE_TITLE } = import.meta.env;',
+      'const { NODE_ENV } = process.env;',
+      'const { notEnv } = config;',
+    ].join('\n');
+    expect(findEnvKeys(text)).toEqual([
+      'DATABASE_URL',
+      'PORT',
+      'JWT_SECRET',
+      'REDIS_URL',
+      'SMTP_HOST',
+      'SENTRY_DSN',
+      'S3_BUCKET',
+      'AWS_REGION',
+      'BUN_KEY',
+      'DENO_KEY',
+      'VITE_TITLE',
+    ]);
+  });
 });
 
 describe('scanCodeKeys', () => {

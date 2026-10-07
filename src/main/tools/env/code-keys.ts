@@ -1,4 +1,4 @@
-// Env variable names a package's source reads (os.getenv("X"), process.env.X, …). File contents stay in
+// Env variable names a package's source reads (os.getenv("X"), process.env.X, const { X } = process.env, …). File contents stay in
 // memory: only the names leave this module, for display; they are never logged or stored.
 import { realpath } from 'node:fs/promises';
 import { resolveInside } from '../../fs/inside';
@@ -13,14 +13,37 @@ const SKIP_PATH = /^(\.venv|venv|env)\/|(^|\/)(\.venv|site-packages|__pycache__|
 
 const NAME = String.raw`(?<name>[A-Za-z_][A-Za-z0-9_]*)`;
 const QUOTED = String.raw`\s*(?<quote>['"])${NAME}\k<quote>`;
+/** The env object of Node, Vite and Bun. */
+const ENV_OBJECT = String.raw`(?:process\.env|import\.meta\.env|Bun\.env)`;
 const PATTERNS = [
-  // os.getenv("X", getenv("X", os.environ.get("X", environ.setdefault("X"
-  new RegExp(String.raw`\b(?:getenv|environ\.get|environ\.setdefault)\(${QUOTED}`, 'g'),
-  // os.environ["X"], process.env["X"]
-  new RegExp(String.raw`\b(?:environ|process\.env)\[${QUOTED}\s*\]`, 'g'),
-  // process.env.X, import.meta.env.X
-  new RegExp(String.raw`\b(?:process\.env|import\.meta\.env)\.${NAME}`, 'g'),
+  // os.getenv("X", getenv("X", os.environ.get("X", environ.setdefault("X", Deno.env.get("X"
+  new RegExp(
+    String.raw`\b(?:getenv|environ\.get|environ\.setdefault|Deno\.env\.get)\(${QUOTED}`,
+    'g',
+  ),
+  // os.environ["X"], process.env["X"], process.env?.["X"], process.env!["X"]
+  new RegExp(String.raw`\b(?:environ|${ENV_OBJECT}(?:\?\.|!)?)\[${QUOTED}\s*\]`, 'g'),
+  // process.env.X, process.env?.X, process.env!.X, import.meta.env.X, Bun.env.X
+  new RegExp(String.raw`\b${ENV_OBJECT}(?:\?|!)?\.${NAME}`, 'g'),
 ];
+
+/** `const { A, B: b, C = "x", ...rest } = process.env`: the braces' text, one destructuring at a time. */
+const DESTRUCTURING = new RegExp(String.raw`\{(?<body>[^{}]{1,4000})\}\s*=\s*${ENV_OBJECT}\b`, 'g');
+const DESTRUCTURED_KEY =
+  /^(?:(?<quote>['"])(?<quoted>[A-Za-z_][A-Za-z0-9_]*)\k<quote>|(?<name>[A-Za-z_][A-Za-z0-9_]*))\s*(?:[:=]|$)/;
+
+/** The keys a destructuring pattern names (renamed or defaulted ones too; rest elements skipped). */
+function destructuredKeys(body: string): string[] {
+  return body
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+    .split(',')
+    .flatMap((part) => {
+      const groups = DESTRUCTURED_KEY.exec(part.trim())?.groups;
+      const key = groups?.['quoted'] ?? groups?.['name'];
+      return key === undefined ? [] : [key];
+    });
+}
 
 /** Set by the system, the shell or the toolchain, not by the project's env files. */
 const NOT_PROJECT_KEYS = new Set([
@@ -53,11 +76,14 @@ const NOT_PROJECT_KEYS = new Set([
 /** The names a source text reads, in order of first appearance. */
 export function findEnvKeys(text: string): string[] {
   const found: { key: string; at: number }[] = [];
+  const add = (key: string | undefined, at: number) => {
+    if (key !== undefined && !NOT_PROJECT_KEYS.has(key)) found.push({ key, at });
+  };
   for (const pattern of PATTERNS) {
-    for (const match of text.matchAll(pattern)) {
-      const key = match.groups?.['name'];
-      if (key !== undefined && !NOT_PROJECT_KEYS.has(key)) found.push({ key, at: match.index });
-    }
+    for (const match of text.matchAll(pattern)) add(match.groups?.['name'], match.index);
+  }
+  for (const match of text.matchAll(DESTRUCTURING)) {
+    for (const key of destructuredKeys(match.groups?.['body'] ?? '')) add(key, match.index);
   }
   return [...new Set(found.sort((a, b) => a.at - b.at).map((f) => f.key))];
 }
