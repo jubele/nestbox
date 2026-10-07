@@ -13,3 +13,5 @@ e2e/fixtures/fake-vercel/vercel text eol=lf
 e2e/fixtures/fake-gh/gh.cmd text eol=crlf
 e2e/fixtures/fake-gh/gh text eol=lf
 src/main/tools/ci/__fixtures__/* -text
+e2e/fixtures/python-app/backend/.venv/Scripts/python.cmd text eol=crlf
+e2e/fixtures/python-app/backend/.venv/bin/python text eol=lf

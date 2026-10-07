@@ -5,7 +5,7 @@ let app: ElectronApplication;
 let page: Page;
 
 test.beforeEach(async () => {
-  // frontend/ (package.json) + backend/ (FastAPI, no package.json) with a stand-in virtualenv.
+  // frontend/ (package.json) + backend/ (requirements.txt and main.py, no package.json) with a stand-in virtualenv.
   const project = await copyFixture('python-app');
   ({ app, page } = await launch(project));
 });
@@ -32,7 +32,7 @@ test('one run group starts the frontend and the Python backend in its virtualenv
   await editor.getByRole('textbox', { name: 'Group name' }).fill('dev');
   await editor
     .getByRole('group', { name: 'backend' })
-    .getByRole('checkbox', { name: 'dev' })
+    .getByRole('checkbox', { name: 'main' })
     .check();
   await editor
     .getByRole('group', { name: 'frontend' })
@@ -44,11 +44,12 @@ test('one run group starts the frontend and the Python backend in its virtualenv
 
   await sidebar.getByRole('button', { name: 'backend', exact: true }).click();
   await page.getByRole('tab', { name: 'Scripts' }).click();
-  await expect(page.getByTitle('Detected from the Python files')).toBeVisible();
-  await page.getByRole('button', { name: 'dev', exact: true }).click();
-  const log = page.getByRole('log', { name: 'dev output' });
-  await expect(log).toContainText('fake python -m uvicorn main:app --reload', { timeout: 30_000 });
+  await expect(page.getByText('detected', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'main', exact: true }).click();
+  const log = page.getByRole('log', { name: 'main output' });
+  await expect(log).toContainText('fake python main.py', { timeout: 30_000 });
   await expect(log).toContainText('VIRTUAL_ENV set');
+  await expect(log).toContainText('virtualenv: backend/.venv');
 
   await sidebar.getByRole('button', { name: 'python-app-web', exact: true }).click();
   await page.getByRole('tab', { name: 'Scripts' }).click();
