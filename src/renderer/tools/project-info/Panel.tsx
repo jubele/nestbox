@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import type { ToolPanelProps } from '../types';
-import { useProjectFacts } from './use-facts';
+import { useEcosystemSummaries, useProjectFacts } from './use-facts';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -17,6 +17,8 @@ function Empty({ children }: { children: ReactNode }) {
 
 export default function ProjectInfoPanel({ projectId }: ToolPanelProps) {
   const { data, isPending } = useProjectFacts(projectId);
+  const { data: summaries } = useEcosystemSummaries(projectId);
+  const ecosystems = summaries?.ecosystems ?? [];
   if (isPending || !data) return null;
   const scripts = Object.entries(data.packageJson?.scripts ?? {});
   const yesNo = (v: boolean) => (v ? 'yes' : 'no');
@@ -52,6 +54,12 @@ export default function ProjectInfoPanel({ projectId }: ToolPanelProps) {
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
           <dt className="text-fg-muted">Package manager</dt>
           <dd className="font-mono text-fg">{data.packageManager ?? 'none'}</dd>
+          {ecosystems.map((e) => (
+            <Fragment key={e.id}>
+              <dt className="text-fg-muted">Ecosystem</dt>
+              <dd className="text-fg">{e.summary}</dd>
+            </Fragment>
+          ))}
           <dt className="text-fg-muted">Prisma schema</dt>
           <dd className="font-mono text-fg">{data.prismaSchema ?? 'none'}</dd>
           <dt className="text-fg-muted">Docker Compose</dt>

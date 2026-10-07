@@ -30,3 +30,26 @@ describe('ProjectInfoCard', () => {
     expect(await screen.findByText('pnpm')).toBeInTheDocument();
   });
 });
+
+describe('ProjectInfoCard ecosystems', () => {
+  it("shows each detected ecosystem's summary", async () => {
+    installMockBridge({
+      'tools:invoke': (({ method }: { method: string }) =>
+        method === 'summaries'
+          ? { ecosystems: [{ id: 'python', summary: 'Python · Django · .venv' }] }
+          : makeDetected()) as never,
+    });
+    renderWithProviders(<ProjectInfoCard projectId="p1" />);
+    expect(await screen.findByText('Python · Django · .venv')).toBeInTheDocument();
+    expect(screen.getByText('Ecosystems')).toBeInTheDocument();
+  });
+
+  it('has no ecosystems row without one', async () => {
+    installMockBridge({
+      'tools:invoke': (({ method }: { method: string }) => (method === 'summaries' ? { ecosystems: [] } : makeDetected())) as never,
+    });
+    renderWithProviders(<ProjectInfoCard projectId="p1" />);
+    await screen.findByText('pnpm');
+    expect(screen.queryByText('Ecosystems')).toBeNull();
+  });
+});

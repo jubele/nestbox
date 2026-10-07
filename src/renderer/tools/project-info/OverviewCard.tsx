@@ -1,9 +1,11 @@
 import { Button } from '@/components/ui/button';
 import type { ToolPanelProps } from '../types';
-import { useProjectFacts } from './use-facts';
+import { useEcosystemSummaries, useProjectFacts } from './use-facts';
 
 export function ProjectInfoCard({ projectId }: ToolPanelProps) {
   const { data, isError, refetch, isFetching } = useProjectFacts(projectId);
+  const { data: summaries } = useEcosystemSummaries(projectId);
+  const ecosystems = summaries?.ecosystems ?? [];
   if (isError) {
     return (
       <section aria-label="Project info" className="flex flex-col gap-3 rounded-lg border border-line bg-card p-4">
@@ -38,6 +40,12 @@ export function ProjectInfoCard({ projectId }: ToolPanelProps) {
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
         <dt className="text-fg-muted">Package manager</dt>
         <dd className="font-mono text-fg">{data.packageManager ?? 'none'}</dd>
+        {ecosystems.length > 0 && (
+          <>
+            <dt className="text-fg-muted">Ecosystems</dt>
+            <dd className="text-fg">{ecosystems.map((e) => e.summary).join(', ')}</dd>
+          </>
+        )}
         <dt className="text-fg-muted">Scripts</dt>
         <dd className="text-fg">{scripts} scripts</dd>
         <dt className="text-fg-muted">Env files</dt>

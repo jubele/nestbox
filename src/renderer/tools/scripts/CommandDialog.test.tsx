@@ -9,8 +9,9 @@ import { installScriptsBridge } from './test-bridge';
 function open(
   initial: { name: string; command: string; main?: boolean } | null = null,
   methods = {},
+  files: { path: string; argv: string[] }[] = [],
 ) {
-  const fx = installScriptsBridge({ methods });
+  const fx = installScriptsBridge({ methods, files });
   const onOpenChange = vi.fn();
   renderWithProviders(
     <CommandDialog projectId="p1::backend" initial={initial} onOpenChange={onOpenChange} />,
@@ -117,5 +118,25 @@ describe('CommandDialog', () => {
         { previousName: 'api', name: 'api', argv: ['node', 'api.js'], main: true },
       ]),
     );
+  });
+
+  it("fills the command from a file the package's ecosystem offers", async () => {
+    const { callsTo } = open(null, {}, [
+      { path: 'server.py', argv: ['python', 'server.py'] },
+      { path: 'app/run server.py', argv: ['python', 'app/run server.py'] },
+    ]);
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'File to run' }), 'app/run server.py');
+    expect(screen.getByRole('textbox', { name: 'Command' })).toHaveValue('python "app/run server.py"');
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('run-server');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(callsTo('saveCommand')).toEqual([{ name: 'run-server', argv: ['python', 'app/run server.py'], main: false }]),
+    );
+  });
+
+  it('offers no file picker when the package has none', async () => {
+    open({ name: 'api', command: 'node api.js' });
+    expect(await screen.findByRole('textbox', { name: 'Name' })).toHaveValue('api');
+    expect(screen.queryByRole('combobox', { name: 'File to run' })).toBeNull();
   });
 });

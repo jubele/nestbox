@@ -70,7 +70,47 @@ export function useCommandActions(projectId: string) {
     onSuccess: refresh,
     onError: showError,
   });
-  return { save, remove };
+  /** A detected command: hidden, since detection would find it again. */
+  const hide = useMutation({
+    mutationFn: (name: string) => api.tools.invoke('scripts', projectId, 'hideCommand', { name }),
+    onSuccess: refresh,
+    onError: showError,
+  });
+  const show = useMutation({
+    mutationFn: (name: string) => api.tools.invoke('scripts', projectId, 'showCommand', { name }),
+    onSuccess: refresh,
+    onError: showError,
+  });
+  return { save, remove, hide, show };
+}
+
+/** Files the package's ecosystems offer to run (e.g. `.py` files), for the Add command dialog. */
+export function useRunnableFiles(projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.tool('scripts', projectId, 'files'),
+    queryFn: () => api.tools.invoke('scripts', projectId, 'files', {}),
+    staleTime: 30_000,
+  });
+}
+
+/** Virtualenvs inside the project, for the Python environment choice. */
+export function usePythonEnvs(projectId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.tool('scripts', projectId, 'pythonEnvs'),
+    queryFn: () => api.tools.invoke('scripts', projectId, 'pythonEnvs', {}),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
+export function useSetVenv(projectId: string) {
+  const refresh = useRefreshAfter(projectId);
+  return useMutation({
+    mutationFn: (input: { mode: 'auto' | 'none' | 'path'; path?: string }) =>
+      api.tools.invoke('scripts', projectId, 'setVenv', input),
+    onSettled: refresh,
+    onError: showError,
+  });
 }
 
 export function useSetEnvFile(projectId: string) {
