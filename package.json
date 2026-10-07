@@ -1,6 +1,6 @@
 {
   "name": "nestbox",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "private": true,
   "description": "Local developer toolbox for Node.js and TypeScript projects",
   "license": "MIT",
