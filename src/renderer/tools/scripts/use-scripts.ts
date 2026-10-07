@@ -19,19 +19,20 @@ export function useScriptList(projectId: string) {
   });
 }
 
-function useRefreshAfter(projectId: string) {
+/** Every Scripts list, since a root's favorites show its packages' rows. */
+function useRefreshAfter() {
   const queryClient = useQueryClient();
   return () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.processes }),
-      queryClient.invalidateQueries({ queryKey: scriptListKey(projectId) }),
+      queryClient.invalidateQueries({ queryKey: ['tool', 'scripts'] }),
     ]);
 }
 
 export type ScriptAction = 'start' | 'stop' | 'restart';
 
 export function useScriptAction(projectId: string) {
-  const refresh = useRefreshAfter(projectId);
+  const refresh = useRefreshAfter();
   return useMutation({
     mutationFn: ({ action, script }: { action: ScriptAction; script: string }) =>
       api.tools.invoke('scripts', projectId, action, { script }),
@@ -41,7 +42,7 @@ export function useScriptAction(projectId: string) {
 }
 
 export function useSetAutoRestart(projectId: string) {
-  const refresh = useRefreshAfter(projectId);
+  const refresh = useRefreshAfter();
   return useMutation({
     mutationFn: ({ script, enabled }: { script: string; enabled: boolean }) =>
       api.tools.invoke('scripts', projectId, 'setAutoRestart', { script, enabled }),
@@ -74,7 +75,7 @@ export function useCommandActions(projectId: string) {
 }
 
 export function useSetEnvFile(projectId: string) {
-  const refresh = useRefreshAfter(projectId);
+  const refresh = useRefreshAfter();
   return useMutation({
     mutationFn: ({ script, file }: { script: string; file: string | null }) =>
       api.tools.invoke('scripts', projectId, 'setEnvFile', { script, file }),
@@ -105,7 +106,7 @@ export function useStartIn() {
 }
 
 export function useRunGroupActions(projectId: string) {
-  const refresh = useRefreshAfter(projectId);
+  const refresh = useRefreshAfter();
   const save = useMutation({
     mutationFn: (input: { previousName?: string; group: RunGroup }) =>
       api.tools.invoke('scripts', projectId, 'saveRunGroup', input),

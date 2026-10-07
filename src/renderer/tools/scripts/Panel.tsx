@@ -2,7 +2,7 @@ import { Columns2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DEFAULT_PANES, useUiStore } from '@/state/ui-store';
 import type { ToolPanelProps } from '../types';
-import { LogPane } from './LogPane';
+import { LogPane, type PaneOption } from './LogPane';
 import { RunGroups } from './RunGroups';
 import { ScriptList } from './ScriptList';
 import { useScriptList } from './use-scripts';
@@ -13,7 +13,16 @@ export default function ScriptsPanel({ projectId }: ToolPanelProps) {
   const setActivePane = useUiStore((s) => s.setActivePane);
   const toggleSplit = useUiStore((s) => s.toggleSplit);
   const { data } = useScriptList(projectId);
-  const scripts = data?.scripts.map((s) => s.name) ?? [];
+  // A root with packages also offers its packages' favorites, named with the package.
+  const options: PaneOption[] = [
+    ...(data?.favorites ?? [])
+      .filter((f) => f.projectId !== projectId)
+      .map((f) => ({
+        ref: { projectId: f.projectId, script: f.name },
+        label: `${f.packageName} · ${f.name}`,
+      })),
+    ...(data?.scripts ?? []).map((s) => ({ ref: { projectId, script: s.name }, label: s.name })),
+  ];
   const split = panes.scripts.length > 1;
 
   return (
@@ -33,10 +42,9 @@ export default function ScriptsPanel({ projectId }: ToolPanelProps) {
           {panes.scripts.map((script, i) => (
             <LogPane
               key={i} // panes are positional
-              projectId={projectId}
-              script={script}
-              scripts={scripts}
-              onScriptChange={(s) => setPaneScript(projectId, i, s)}
+              target={script}
+              options={options}
+              onTargetChange={(target) => setPaneScript(projectId, i, target)}
               active={split && panes.active === i}
               onActivate={() => setActivePane(projectId, i)}
             />

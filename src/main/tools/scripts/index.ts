@@ -160,6 +160,21 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
     published = new Set(byProject.keys());
   }
 
+  /** A package's runnables as its Scripts tab shows them. */
+  const infosOf = (settings: ScriptsSettings, project: DetectedProject) => {
+    const main = mainOf(settings, project);
+    return runnables(project, settings).map((r) => ({
+      name: r.name,
+      command: r.command,
+      autoRestart: isAuto(settings, project, r.name),
+      kind: r.kind,
+      envFile: envFileOf(settings, project, r),
+      main: r.name === main,
+    }));
+  };
+
+  const envFilesOf = (project: DetectedProject): Promise<string[]> => deps.envFiles.list(project.path).catch(() => []);
+
   const findRunnable = (project: DetectedProject, settings: ScriptsSettings, name: string): Runnable | null =>
     runnables(project, settings).find((r) => r.name === name) ?? null;
 
@@ -323,20 +338,30 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
     handlers: {
       list: async (ctx: Ctx) => {
         const settings = ctx.settings.get();
-        const main = mainOf(settings, ctx.project);
-        const scripts = runnables(ctx.project, settings)
-          .map((r) => ({
-            name: r.name,
-            command: r.command,
-            autoRestart: isAuto(settings, ctx.project, r.name),
-            kind: r.kind,
-            envFile: envFileOf(settings, ctx.project, r),
-            main: r.name === main,
-          }))
+        const scripts = infosOf(settings, ctx.project)
           // The main one first.
           .sort((a, b) => Number(b.main) - Number(a.main));
-        const envFiles = await deps.envFiles.list(ctx.project.path).catch(() => []);
-        if (ctx.project.relPath !== '') return { scripts, runGroups: null, packages: null, envFiles };
+        const envFiles = await envFilesOf(ctx.project);
+        if (ctx.project.relPath !== '') {
+          return { scripts, runGroups: null, packages: null, favorites: null, envFiles };
+        }
+        // Each package's main, the root's own first: what a root with packages lists.
+        const favorites =
+          ctx.project.workspaces.length === 0
+            ? null
+            : await Promise.all(
+                [ctx.project, ...ctx.project.workspaces].flatMap((p) =>
+                  infosOf(settings, p)
+                    .filter((info) => info.main)
+                    .map(async (info) => ({
+                      ...info,
+                      projectId: p.id,
+                      relPath: p.relPath,
+                      packageName: p.name,
+                      envFiles: p.id === ctx.project.id ? envFiles : await envFilesOf(p),
+                    })),
+                ),
+              );
         const packages = [ctx.project, ...ctx.project.workspaces].map((p) => {
           const names = runnables(p, settings).map((r) => r.name);
           const pkgMain = mainOf(settings, p);
@@ -348,7 +373,7 @@ export function createScriptsTool(deps: ScriptsToolDeps): AnyMainTool {
             main: pkgMain !== null && names.includes(pkgMain) ? pkgMain : null,
           };
         });
-        return { scripts, runGroups: deps.runGroups.get(ctx.project.rootId), packages, envFiles };
+        return { scripts, runGroups: deps.runGroups.get(ctx.project.rootId), packages, favorites, envFiles };
       },
 
       start: async (ctx: Ctx, { script }) => {

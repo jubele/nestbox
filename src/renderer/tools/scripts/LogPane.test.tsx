@@ -10,6 +10,8 @@ let seq = 0;
 const line = (text: string, stream: LogLine['stream'] = 'stdout'): LogLine => ({ seq: ++seq, ts: Date.UTC(2026, 9, 1), stream, text });
 const pino = (level: number, msg: string, extra: Record<string, unknown> = {}) => line(JSON.stringify({ level, msg, ...extra }));
 
+const ref = (script: string) => ({ projectId: 'p1', script });
+
 function setup(lines: LogLine[], over: Record<string, (input: never) => unknown> = {}) {
   const calls: { method: string; input: unknown }[] = [];
   const bridge = installMockBridge({
@@ -25,7 +27,16 @@ function setup(lines: LogLine[], over: Record<string, (input: never) => unknown>
   });
   const onScriptChange = vi.fn();
   renderWithProviders(
-    <LogPane projectId="p1" script="dev" scripts={['dev', 'build']} onScriptChange={onScriptChange} active onActivate={() => {}} />,
+    <LogPane
+      target={ref('dev')}
+      options={[
+        { ref: ref('dev'), label: 'dev' },
+        { ref: ref('build'), label: 'build' },
+      ]}
+      onTargetChange={onScriptChange}
+      active
+      onActivate={() => {}}
+    />,
   );
   return { bridge, calls, onScriptChange };
 }
@@ -49,7 +60,7 @@ afterAll(() => {
 describe('LogPane', () => {
   it('asks for a script when none is picked', () => {
     installMockBridge({});
-    renderWithProviders(<LogPane projectId="p1" script={null} scripts={['dev']} onScriptChange={() => {}} active onActivate={() => {}} />);
+    renderWithProviders(<LogPane target={null} options={[{ ref: ref('dev'), label: 'dev' }]} onTargetChange={() => {}} active onActivate={() => {}} />);
     expect(screen.getByText('Pick a script to see its output.')).toBeInTheDocument();
   });
 
@@ -182,7 +193,7 @@ describe('LogPane', () => {
     await screen.findByText('a');
     await userEvent.click(screen.getByRole('combobox', { name: 'Script' }));
     await userEvent.click(await screen.findByRole('option', { name: 'build' }));
-    expect(onScriptChange).toHaveBeenCalledWith('build');
+    expect(onScriptChange).toHaveBeenCalledWith(ref('build'));
   });
 
   it('labels the region by script', async () => {

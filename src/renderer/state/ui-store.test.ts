@@ -31,20 +31,29 @@ describe('views', () => {
 });
 
 describe('script panes', () => {
+  const ref = (script: string, projectId = 'p1') => ({ projectId, script });
+
   it('fills the active pane and splits into two', () => {
     const s = () => useUiStore.getState();
     s().showScript('p1', 'dev');
-    expect(s().scriptPanes['p1']).toEqual({ scripts: ['dev'], active: 0 });
+    expect(s().scriptPanes['p1']).toEqual({ scripts: [ref('dev')], active: 0 });
     s().toggleSplit('p1');
-    expect(s().scriptPanes['p1']).toEqual({ scripts: ['dev', null], active: 1 });
+    expect(s().scriptPanes['p1']).toEqual({ scripts: [ref('dev'), null], active: 1 });
     s().showScript('p1', 'api');
-    expect(s().scriptPanes['p1']?.scripts).toEqual(['dev', 'api']);
+    expect(s().scriptPanes['p1']?.scripts).toEqual([ref('dev'), ref('api')]);
     s().setActivePane('p1', 0);
     s().showScript('p1', 'build');
-    expect(s().scriptPanes['p1']?.scripts).toEqual(['build', 'api']);
-    s().setPaneScript('p1', 1, 'web');
-    expect(s().scriptPanes['p1']).toEqual({ scripts: ['build', 'web'], active: 1 });
+    expect(s().scriptPanes['p1']?.scripts).toEqual([ref('build'), ref('api')]);
+    s().setPaneScript('p1', 1, ref('web'));
+    expect(s().scriptPanes['p1']).toEqual({ scripts: [ref('build'), ref('web')], active: 1 });
     s().toggleSplit('p1');
-    expect(s().scriptPanes['p1']).toEqual({ scripts: ['build'], active: 0 });
+    expect(s().scriptPanes['p1']).toEqual({ scripts: [ref('build')], active: 0 });
+  });
+
+  it("shows a package's script in its root's panes", () => {
+    const s = () => useUiStore.getState();
+    s().showScript('r1', 'dev', 'r1::api');
+    expect(s().scriptPanes['r1']?.scripts).toEqual([ref('dev', 'r1::api')]);
+    expect(s().scriptPanes['r1::api']).toBeUndefined();
   });
 });
