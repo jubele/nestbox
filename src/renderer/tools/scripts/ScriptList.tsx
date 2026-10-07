@@ -1,4 +1,4 @@
-import { Pencil, Play, Plus, RotateCw, Square, Star, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square, Star, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { isLive, type ProcessSummary } from '@shared/processes';
 import {
@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { useProcesses } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/state/ui-store';
-import type { ScriptInfo, ScriptKind } from '@shared/tools/scripts/contract';
+import type { Favorite, ScriptInfo, ScriptKind } from '@shared/tools/scripts/contract';
 import { CommandDialog } from './CommandDialog';
 import { PythonEnvPicker } from './PythonEnvPicker';
 import {
@@ -74,8 +74,14 @@ function EnvFileSelect({ projectId, info, envFiles }: { projectId: string; info:
   );
 }
 
+/**
+ * One runnable. `projectId` is the package it belongs to (every action goes there) and `tabId` the Scripts tab
+ * showing it: a root's favorites belong to its packages, and are edited or removed in the package's own tab.
+ */
 function ScriptRow({
   projectId,
+  tabId,
+  packageName,
   info,
   process,
   envFiles,
@@ -84,17 +90,20 @@ function ScriptRow({
   onHide,
 }: {
   projectId: string;
+  tabId: string;
+  packageName?: string;
   info: ScriptInfo;
   process: ProcessSummary | undefined;
   envFiles: string[];
-  onEdit(): void;
-  onDelete(): void;
-  onHide(): void;
+  onEdit?(): void;
+  onDelete?(): void;
+  onHide?(): void;
 }) {
   const action = useScriptAction(projectId);
   const setAutoRestart = useSetAutoRestart(projectId);
   const setMain = useSetMain(projectId);
   const showScript = useUiStore((s) => s.showScript);
+  const show = () => showScript(tabId, info.name, projectId);
   const live = process !== undefined && isLive(process.state);
   const badge = process ? BADGES[process.state] : undefined;
   const crash = process ? crashText(process) : null;
@@ -106,12 +115,17 @@ function ScriptRow({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => showScript(projectId, info.name)}
+          onClick={show}
           className="min-w-0 truncate font-mono text-xs font-semibold text-fg hover:text-brand"
           title="Show output"
         >
           {info.name}
         </button>
+        {packageName !== undefined && (
+          <span title="The package it belongs to" className="truncate text-[11px] text-fg-muted">
+            {packageName}
+          </span>
+        )}
         {chip && (
           <span title={chip.title} className="rounded border border-line px-1.5 py-px text-[10px] text-fg-muted">
             {chip.label}
@@ -137,13 +151,17 @@ function ScriptRow({
             size="icon"
             aria-pressed={info.main}
             aria-label={info.main ? `${info.name} is the main command` : `Make ${info.name} the main command`}
-            title={info.main ? 'The main command of this package (click to clear)' : 'Make it the main command of this package'}
+            title={
+              info.main
+                ? "The package's main command, listed in the project's Scripts tab (click to clear)"
+                : "Make it the package's main command (listed in the project's Scripts tab)"
+            }
             disabled={setMain.isPending}
             onClick={() => setMain.mutate({ script: info.name, main: !info.main })}
           >
             <Star className={cn(info.main ? 'fill-current text-brand' : 'text-fg-faint')} />
           </Button>
-          {info.kind === 'detected' && (
+          {info.kind === 'detected' && onHide && (
             <Button
               variant="ghost"
               size="icon"
@@ -155,7 +173,7 @@ function ScriptRow({
               <Trash2 />
             </Button>
           )}
-          {info.kind === 'custom' && (
+          {info.kind === 'custom' && onEdit && onDelete && (
             <>
               <Button variant="ghost" size="icon" aria-label={`Edit ${info.name}`} onClick={onEdit}>
                 <Pencil />
@@ -193,7 +211,7 @@ function ScriptRow({
               aria-label={`Start ${info.name}`}
               disabled={busy}
               onClick={() => {
-                showScript(projectId, info.name);
+                show();
                 action.mutate({ action: 'start', script: info.name });
               }}
             >
@@ -228,18 +246,86 @@ function ScriptRow({
   );
 }
 
+type ListData = NonNullable<ReturnType<typeof useScriptList>['data']>;
+
 export function ScriptList({ projectId }: { projectId: string }) {
   const { data, isPending, isError } = useScriptList(projectId);
+  if (isPending) return <p className="text-xs text-fg-muted">Loading scripts…</p>;
+  if (isError || !data) return <p className="text-xs text-err">Couldn't load the scripts.</p>;
+  if (data.favorites === null) {
+    return (
+      <section aria-label="Scripts">
+        <PackageScripts projectId={projectId} data={data} title="Scripts" />
+      </section>
+    );
+  }
+  return (
+    <section aria-label="Scripts">
+      <Favorites tabId={projectId} favorites={data.favorites} />
+      <RootFolder projectId={projectId} data={data} />
+    </section>
+  );
+}
+
+/** A root's packages' main commands (its own included), each acting on its own package. */
+function Favorites({ tabId, favorites }: { tabId: string; favorites: Favorite[] }) {
+  const { data: processes = [] } = useProcesses();
+  return (
+    <div role="group" aria-label="Favorites">
+      <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-fg-muted uppercase">Favorites</h3>
+      {favorites.length === 0 && (
+        <p className="text-xs text-fg-faint">Star a script in a package's Scripts tab to show it here.</p>
+      )}
+      <ul className="space-y-1.5">
+        {favorites.map((f) => (
+          <ScriptRow
+            key={f.projectId}
+            projectId={f.projectId}
+            tabId={tabId}
+            packageName={f.packageName}
+            info={f}
+            process={processes.find((p) => p.projectId === f.projectId && p.script === f.name)}
+            envFiles={f.envFiles}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The root folder's own scripts, folded away: its main one is already among the favorites. */
+function RootFolder({ projectId, data }: { projectId: string; data: ListData }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-fg-muted uppercase hover:text-fg"
+      >
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        Root folder ({data.scripts.length})
+      </button>
+      {open && (
+        <div className="mt-2">
+          <PackageScripts projectId={projectId} data={data} title={null} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One package's runnables, with Add command, the Python environment and restore. */
+function PackageScripts({ projectId, data, title }: { projectId: string; data: ListData; title: string | null }) {
   const { data: processes = [] } = useProcesses();
   const commands = useCommandActions(projectId);
   const [editing, setEditing] = useState<ScriptInfo | 'new' | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  if (isPending) return <p className="text-xs text-fg-muted">Loading scripts…</p>;
-  if (isError || !data) return <p className="text-xs text-err">Couldn't load the scripts.</p>;
   return (
-    <section aria-label="Scripts">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-[10px] font-semibold tracking-wider text-fg-muted uppercase">Scripts</h3>
+    <>
+      <div className={cn('mb-2 flex items-center gap-2', title === null ? 'justify-end' : 'justify-between')}>
+        {title !== null && <h3 className="text-[10px] font-semibold tracking-wider text-fg-muted uppercase">{title}</h3>}
         <Button variant="ghost" size="sm" onClick={() => setEditing('new')}>
           <Plus />
           Add command
@@ -252,6 +338,7 @@ export function ScriptList({ projectId }: { projectId: string }) {
           <ScriptRow
             key={info.name}
             projectId={projectId}
+            tabId={projectId}
             info={info}
             process={processes.find((p) => p.projectId === projectId && p.script === info.name)}
             envFiles={data.envFiles}
@@ -305,6 +392,6 @@ export function ScriptList({ projectId }: { projectId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </>
   );
 }

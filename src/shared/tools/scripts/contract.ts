@@ -76,6 +76,16 @@ export const ScriptInfoSchema = z.object({
 });
 export type ScriptInfo = z.infer<typeof ScriptInfoSchema>;
 
+/** A package's main script or command, as the root's Scripts tab lists it (it acts on its own package). */
+export const FavoriteSchema = ScriptInfoSchema.extend({
+  projectId: z.string(),
+  relPath: z.string(),
+  packageName: z.string(),
+  /** That package's env files, for the row's Env choice. */
+  envFiles: z.array(z.string()),
+});
+export type Favorite = z.infer<typeof FavoriteSchema>;
+
 export const PackageScriptsSchema = z.object({
   relPath: z.string(),
   name: z.string(),
@@ -108,6 +118,11 @@ export const scriptsContract = defineContract({
       runGroups: z.array(RunGroupSchema).nullable(),
       /** Root projects only: every package's scripts, for the run group editor. */
       packages: z.array(PackageScriptsSchema).nullable(),
+      /**
+       * Roots with packages only: each package's main (the root's own first), which is what their Scripts tab
+       * lists; `scripts` is then the root folder's own. null elsewhere.
+       */
+      favorites: z.array(FavoriteSchema).nullable(),
       /** The package's env files right now, for the Env choice of each row. */
       envFiles: z.array(z.string()),
       /** Detected commands the user removed from this package, to restore. */

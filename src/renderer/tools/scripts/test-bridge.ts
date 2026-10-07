@@ -1,7 +1,7 @@
 // Test helper for the Scripts tool's renderer tests.
 import { NestboxError } from '@shared/errors';
 import type { ProcessSummary } from '@shared/processes';
-import type { PackageScripts, ScriptInfo } from '@shared/tools/scripts/contract';
+import type { Favorite, PackageScripts, ScriptInfo } from '@shared/tools/scripts/contract';
 import type { RunGroup } from '@shared/types';
 import { installMockBridge } from '@/test/mock-bridge';
 
@@ -9,6 +9,7 @@ export interface ScriptsFixture {
   scripts?: ScriptInfo[];
   runGroups?: RunGroup[] | null;
   packages?: PackageScripts[] | null;
+  favorites?: Favorite[] | null;
   processes?: ProcessSummary[];
   envFiles?: string[];
   pythonFiles?: string[];
@@ -37,6 +38,7 @@ export function installScriptsBridge(fx: ScriptsFixture = {}) {
             runGroups: fx.runGroups === undefined ? [] : fx.runGroups,
             packages:
               fx.packages === undefined ? [{ relPath: '', name: 'shop', scripts: ['dev'], compose: false, main: null }] : fx.packages,
+            favorites: fx.favorites ?? null,
             envFiles: fx.envFiles ?? ['.env'],
             hidden: fx.hidden ?? [],
             python: fx.python ?? null,

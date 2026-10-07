@@ -44,7 +44,9 @@ describe('CommandPalette', () => {
     await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(invokes()).toEqual([{ toolId: 'scripts', projectId: 'dec0ded', method: 'start', input: { script: 'serve' } }]));
     await waitFor(() => expect(useUiStore.getState().activeTab['dec0ded']).toBe('scripts'));
-    expect(useUiStore.getState().scriptPanes['dec0ded']?.scripts).toEqual(['serve']);
+    expect(useUiStore.getState().scriptPanes['dec0ded']?.scripts).toEqual([
+      { projectId: 'dec0ded', script: 'serve' },
+    ]);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 

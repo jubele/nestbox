@@ -118,6 +118,7 @@ describe('scripts tool: list and lifecycle', () => {
         { relPath: '', name: 'shop', scripts: ['dev', 'build'], compose: false, main: null },
         { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false, main: null },
       ],
+      favorites: [],
       envFiles: ['.env', '.env.local'],
       hidden: [],
       python: null,
@@ -509,6 +510,7 @@ describe('scripts tool: Python and custom commands', () => {
       ],
       runGroups: null,
       packages: null,
+      favorites: null,
       envFiles: ['.env', '.env.local'],
       hidden: [],
       python: { choice: 'auto', venv: 'backend/.venv', auto: 'backend/.venv' },
@@ -702,6 +704,47 @@ describe('scripts tool: main command', () => {
     await call(backend.id, 'setMain', { script: 'dev', main: false });
     expect(await call(backend.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', main: false }, { name: 'api', main: false }] });
     await expect(call(backend.id, 'setMain', { script: 'nope', main: true })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it("lists every package's main as the root's favorites, acting on its own package", async () => {
+    const { call, platform } = pythonSetup();
+    expect(await call('r2', 'list')).toMatchObject({ favorites: [] });
+    await call(backend.id, 'setMain', { script: 'dev', main: true });
+    await call(backend.id, 'setEnvFile', { script: 'dev', file: '.env.local' });
+    await call(backend.id, 'setAutoRestart', { script: 'dev', enabled: true });
+    expect(await call('r2', 'list')).toMatchObject({
+      favorites: [
+        {
+          projectId: backend.id,
+          relPath: 'backend',
+          packageName: backend.name,
+          envFiles: ['.env', '.env.local'],
+          name: 'dev',
+          command: 'python -m uvicorn main:app --reload',
+          autoRestart: true,
+          kind: 'detected',
+          envFile: '.env.local',
+          main: true,
+        },
+      ],
+    });
+    await call(backend.id, 'start', { script: 'dev' });
+    expect(platform.spawnScript).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: backend.path }),
+    );
+  });
+
+  it('has no favorites on a workspace package or a root without packages', async () => {
+    const { call } = pythonSetup();
+    expect(await call(backend.id, 'list')).toMatchObject({ favorites: null });
+    const single = makeDetectedForTest({
+      id: 's1',
+      rootId: 's1',
+      path: resolve('/dev/one'),
+      packageJson: { name: 'one', scripts: { dev: 'vite' } },
+    });
+    const { call: callSingle } = setup([single]);
+    expect(await callSingle('s1', 'list')).toMatchObject({ favorites: null });
   });
 
   it('carries main over a rename, clears it with main: false and forgets it on delete', async () => {

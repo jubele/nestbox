@@ -27,7 +27,9 @@ describe('ScriptList', () => {
     renderWithProviders(<ScriptList projectId="p1" />);
     await userEvent.click(await screen.findByRole('button', { name: 'Start dev' }));
     await waitFor(() => expect(callsTo('start')).toEqual([{ script: 'dev' }]));
-    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual(['dev']);
+    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual([
+      { projectId: 'p1', script: 'dev' },
+    ]);
   });
 
   it('offers Stop and Restart while live, with a starting badge', async () => {
@@ -78,7 +80,9 @@ describe('ScriptList', () => {
     installScriptsBridge({ scripts });
     renderWithProviders(<ScriptList projectId="p1" />);
     await userEvent.click(await screen.findByRole('button', { name: 'api' }));
-    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual(['api']);
+    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual([
+      { projectId: 'p1', script: 'api' },
+    ]);
   });
 
   it('toasts a failed start', async () => {
@@ -236,5 +240,56 @@ describe('ScriptList', () => {
       await screen.findByText('vite');
       expect(screen.queryByRole('combobox', { name: 'Python environment' })).toBeNull();
     });
+  });
+});
+
+describe('ScriptList on a root with packages', () => {
+  const favorite = {
+    name: 'dev',
+    command: 'python -m uvicorn main:app',
+    autoRestart: false,
+    kind: 'detected' as const,
+    envFile: '.env',
+    main: true,
+    projectId: 'p1::backend',
+    relPath: 'backend',
+    packageName: 'backend',
+    envFiles: ['.env', '.env.prod'],
+  };
+
+  it("lists only the packages' favorites and folds the root's own scripts away", async () => {
+    installScriptsBridge({ scripts, favorites: [favorite] });
+    renderWithProviders(<ScriptList projectId="p1" />);
+    const favorites = await screen.findByRole('group', { name: 'Favorites' });
+    expect(favorites).toHaveTextContent('backend');
+    expect(screen.queryByRole('button', { name: 'Start api' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Root folder (2)' }));
+    expect(screen.getByRole('button', { name: 'Start api' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add command' })).toBeInTheDocument();
+  });
+
+  it("acts on the favorite's own package and shows it in the root's pane", async () => {
+    const { calls } = installScriptsBridge({ scripts, favorites: [favorite] });
+    renderWithProviders(<ScriptList projectId="p1" />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start dev' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'start')).toEqual([
+        { projectId: 'p1::backend', method: 'start', input: { script: 'dev' } },
+      ]),
+    );
+    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual([
+      { projectId: 'p1::backend', script: 'dev' },
+    ]);
+    expect(screen.getByRole('combobox', { name: 'Env file for dev' })).toHaveDisplayValue('.env');
+    // Edited and removed in the package's own tab.
+    expect(screen.queryByRole('button', { name: 'Remove dev' })).toBeNull();
+  });
+
+  it('says how to add one when no package has a favorite', async () => {
+    installScriptsBridge({ scripts, favorites: [] });
+    renderWithProviders(<ScriptList projectId="p1" />);
+    expect(
+      await screen.findByText("Star a script in a package's Scripts tab to show it here."),
+    ).toBeInTheDocument();
   });
 });

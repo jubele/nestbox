@@ -1,8 +1,14 @@
 import { create } from 'zustand';
 
+/** A script of a package: a root's Scripts tab also shows its packages' favorites. */
+export interface PaneScript {
+  projectId: string;
+  script: string;
+}
+
 /** Log panes of a project's Scripts tab: one or two, each showing a script (or none yet). */
 export interface ScriptPanes {
-  scripts: (string | null)[];
+  scripts: (PaneScript | null)[];
   /** The pane a click in the script list fills. */
   active: number;
 }
@@ -39,9 +45,9 @@ export interface UiState extends UiData {
   setActiveTab(projectId: string, tab: string): void;
   setFilter(filter: string): void;
   toggleCollapsed(projectId: string): void;
-  /** Shows a script in the project's active pane. */
-  showScript(projectId: string, script: string): void;
-  setPaneScript(projectId: string, pane: number, script: string): void;
+  /** Shows a script in the project's active pane; `owner` is the package it belongs to (the project by default). */
+  showScript(projectId: string, script: string, owner?: string): void;
+  setPaneScript(projectId: string, pane: number, script: PaneScript): void;
   setActivePane(projectId: string, pane: number): void;
   /** One pane ↔ two panes; closing the split keeps pane 0. */
   toggleSplit(projectId: string): void;
@@ -75,8 +81,11 @@ export const useUiStore = create<UiState>()((set) => {
     setFilter: (filter) => set({ filter }),
     toggleCollapsed: (projectId) =>
       set((s) => ({ collapsed: { ...s.collapsed, [projectId]: !s.collapsed[projectId] } })),
-    showScript: (projectId, script) =>
-      setPanes(projectId, (p) => ({ ...p, scripts: p.scripts.map((s, i) => (i === p.active ? script : s)) })),
+    showScript: (projectId, script, owner = projectId) =>
+      setPanes(projectId, (p) => ({
+        ...p,
+        scripts: p.scripts.map((s, i) => (i === p.active ? { projectId: owner, script } : s)),
+      })),
     setPaneScript: (projectId, pane, script) =>
       setPanes(projectId, (p) => ({ active: pane, scripts: p.scripts.map((s, i) => (i === pane ? script : s)) })),
     setActivePane: (projectId, pane) => setPanes(projectId, (p) => ({ ...p, active: pane })),

@@ -113,7 +113,9 @@ describe('PortsPage', () => {
     setup();
     await userEvent.click(await screen.findByRole('button', { name: 'shop · dev' }));
     expect(useUiStore.getState()).toMatchObject({ view: 'project', selectedProjectId: 'p1', activeTab: { p1: 'scripts' } });
-    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual(['dev']);
+    expect(useUiStore.getState().scriptPanes['p1']?.scripts).toEqual([
+      { projectId: 'p1', script: 'dev' },
+    ]);
   });
 
   it('warns when the list is stale and says when nothing listens', async () => {

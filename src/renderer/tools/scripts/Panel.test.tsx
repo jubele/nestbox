@@ -24,7 +24,10 @@ describe('ScriptsPanel', () => {
     expect(screen.getAllByRole('region', { name: 'Log pane' })).toHaveLength(2);
     await userEvent.click(screen.getByRole('button', { name: 'api' }));
     expect(await screen.findByRole('region', { name: 'api log' })).toBeInTheDocument();
-    expect(useUiStore.getState().scriptPanes['p1']).toEqual({ scripts: [null, 'api'], active: 1 });
+    expect(useUiStore.getState().scriptPanes['p1']).toEqual({
+      scripts: [null, { projectId: 'p1', script: 'api' }],
+      active: 1,
+    });
   });
 
   it('keeps the panes in the store across remounts', async () => {
@@ -74,7 +77,9 @@ describe('useNavigateSubscription', () => {
     act(() => bridge.emit('app:navigate', { projectId: 'p1::packages/api', tab: 'scripts', script: 'dev' }));
     await waitFor(() => expect(useUiStore.getState().selectedProjectId).toBe('p1::packages/api'));
     expect(useUiStore.getState().activeTab['p1::packages/api']).toBe('scripts');
-    expect(useUiStore.getState().scriptPanes['p1::packages/api']?.scripts).toEqual(['dev']);
+    expect(useUiStore.getState().scriptPanes['p1::packages/api']?.scripts).toEqual([
+      { projectId: 'p1::packages/api', script: 'dev' },
+    ]);
   });
 
   it('ignores an invalid payload', () => {
