@@ -59,6 +59,25 @@ export function useEnvEdit(projectId: string) {
   });
 }
 
+/** Env variable names the package's code reads. Scanned when the tab opens, and again on Rescan. */
+export function useCodeKeys(projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.tool('env', projectId, 'codeKeys'),
+    queryFn: () => api.tools.invoke('env', projectId, 'codeKeys', {}),
+    staleTime: 60_000,
+  });
+}
+
+/** A new env file holding the given keys with empty values. */
+export function useCreateEnvFile(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { file: string; keys: string[] }) => api.tools.invoke('env', projectId, 'createFile', input),
+    onError: (error) => toast.error(errorMessage(error)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: envMatrixKey(projectId) }),
+  });
+}
+
 export function useEnvCopy(projectId: string) {
   return useMutation({
     mutationFn: (cell: { file: string; key: string }) => api.tools.invoke('env', projectId, 'copy', cell),

@@ -13,6 +13,10 @@ import { createEnvFileAccess } from './env-files';
 import { createEnvTool, ENV_FACTS } from './index';
 
 const SECRET = 's3cr3t-value';
+const notGitRunner = {
+  ...noopRunner,
+  exec: async (file: string) => ({ code: /git$/.test(file) ? 128 : 0, stdout: '' }),
+};
 let dir = '';
 
 beforeEach(async () => {
@@ -39,7 +43,8 @@ function setup() {
     project: makeDetectedForTest({ path: dir }),
     shared: shared.forProject('p1'),
     emit,
-    platform: createDarwinAdapter({ runner: noopRunner, getEditorCommand: () => 'code' }),
+    // git answers "not a repository", so the code scan walks the folder.
+    platform: createDarwinAdapter({ runner: notGitRunner, getEditorCommand: () => 'code' }),
     settings: { get: () => ({}), update: (fn: (s: object) => object) => fn({}) },
   } as unknown as ToolContext;
   const call = <T,>(method: string, input: unknown = {}) => tool.handlers[method]?.(ctx, input) as Promise<T>;
@@ -156,6 +161,44 @@ describe('env tool', () => {
     expect(await readFile(join(dir, '.env'), 'utf8')).toBe('PORT=8080\n');
   });
 
+  it('reads and writes a whole file as text, refusing a stale version and never logging it', async () => {
+    const { call, emit, logger } = setup();
+    const raw = await call<{ text: string; version: string }>('readRaw', { file: '.env' });
+    expect(raw.text).toBe(`# local\nPORT=3000\nDATABASE_URL=postgres://u:${SECRET}@h/db\n`);
+    const edited = `${raw.text.replace('3000', '4000')}NEW_KEY=1\n`;
+    const { version } = await call<{ version: string }>('writeRaw', { file: '.env', text: edited, version: raw.version });
+    expect(await readFile(join(dir, '.env'), 'utf8')).toBe(edited);
+    expect(version).not.toBe(raw.version);
+    expect(emit).toHaveBeenCalledWith('changed', undefined);
+    await expect(call('writeRaw', { file: '.env', text: 'X=1\n', version: raw.version })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(JSON.stringify(logger.entries)).not.toContain(SECRET);
+    expect(JSON.stringify(logger.entries)).not.toContain('NEW_KEY');
+  });
+
+  it('lists the env keys the code reads, by name only', async () => {
+    const { call, logger } = setup();
+    await writeFile(join(dir, 'main.py'), `import os\nDSN = os.getenv("SENTRY_DSN", "${SECRET}")\nPORT = os.environ["PORT"]\n`);
+    const found = await call<{ keys: unknown[]; files: number; truncated: boolean }>('codeKeys');
+    expect(found).toEqual({
+      keys: [
+        { key: 'PORT', files: 1 },
+        { key: 'SENTRY_DSN', files: 1 },
+      ],
+      files: 1,
+      truncated: false,
+    });
+    expect(JSON.stringify(logger.entries)).not.toContain('SENTRY_DSN');
+  });
+
+  it('creates an env file with empty values for the given keys, never over an existing one', async () => {
+    const { call, emit } = setup();
+    await call('createFile', { file: '.env.local', keys: ['SENTRY_DSN', 'PORT'] });
+    expect(await readFile(join(dir, '.env.local'), 'utf8')).toBe('SENTRY_DSN=\nPORT=\n');
+    expect(emit).toHaveBeenCalledWith('changed', undefined);
+    await expect(call('createFile', { file: '.env', keys: ['X'] })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await readFile(join(dir, '.env'), 'utf8')).toContain('PORT=3000');
+  });
+
   it('returns PORT from .env as a fact, null when absent or invalid', async () => {
     const { call } = setup();
     expect(await call('facts')).toEqual({ port: 3000 });
@@ -186,7 +229,8 @@ describe('env tool', () => {
       project: makeDetectedForTest({ path: dir }),
       shared: shared.forProject('p1'),
       emit: vi.fn(),
-      platform: createDarwinAdapter({ runner: noopRunner, getEditorCommand: () => 'code' }),
+      // git answers "not a repository", so the code scan walks the folder.
+    platform: createDarwinAdapter({ runner: notGitRunner, getEditorCommand: () => 'code' }),
       settings: { get: () => ({}), update: (fn: (s: object) => object) => fn({}) },
     } as unknown as ToolContext;
     await tool.handlers['matrix']?.(context, {});

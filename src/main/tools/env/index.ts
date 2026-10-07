@@ -2,7 +2,9 @@ import { NestboxError } from '@shared/errors';
 import { belongsTo } from '@shared/processes';
 import { envContract, envDefinition } from '@shared/tools/env/contract';
 import type { Logger } from '../../logger';
+import { LS_MAX_BYTES, listFiles } from '../todos/files';
 import { type AnyMainTool, defineMainTool, type ToolContext } from '../types';
+import { MAX_CODE_FILES, scanCodeKeys } from './code-keys';
 import { addEntry, entries, parseEnv, removeEntry, serializeEnv, setValue } from './dotenv';
 import type { EnvFileAccess } from './env-files';
 import { activeProfile, BACKUP_FILE, buildMatrix, profileFiles } from './matrix';
@@ -23,6 +25,7 @@ export interface EnvToolDeps {
 export const ENV_FACTS = 'env.facts';
 
 const WATCH_DEBOUNCE_MS = 200;
+const LS_TIMEOUT_MS = 15_000;
 const URL_KEY = /^DATABASE_URL$|_(URL|URI)$/;
 
 /** PORT as a port number, or null when it is not one. */
@@ -141,6 +144,32 @@ export function createEnvTool(deps: EnvToolDeps): AnyMainTool {
         deps.logger.info('env profile switched', { file });
         ctx.emit('changed', undefined);
         return {};
+      },
+
+      readRaw: async (ctx, { file }) => deps.files.read(ctx.project.path, file),
+
+      writeRaw: async (ctx, { file, text, version }) => {
+        const written = await deps.files.write(ctx.project.path, file, text, version);
+        deps.logger.info('env write', { method: 'writeRaw', file });
+        ctx.emit('changed', undefined);
+        return written;
+      },
+
+      codeKeys: async (ctx) => {
+        const dir = ctx.project.path;
+        const list = await listFiles(dir, {
+          // Every file git knows plus untracked ones that aren't ignored; capped well past the scan's limit.
+          maxFiles: MAX_CODE_FILES * 4,
+          exec: (args) => ctx.platform.execCommand('git', args, { cwd: dir, timeoutMs: LS_TIMEOUT_MS, maxBytes: LS_MAX_BYTES }),
+        });
+        const found = await scanCodeKeys(dir, list.files);
+        deps.logger.info('env code keys', { keys: found.keys.length, files: found.files, truncated: found.truncated });
+        return found;
+      },
+
+      createFile: async (ctx, { file, keys }) => {
+        const unique = [...new Set(keys)];
+        return edit(ctx, file, null, (doc) => unique.reduce((d, key) => addEntry(d, key, ''), doc), 'createFile');
       },
 
       facts: async (ctx) => {
