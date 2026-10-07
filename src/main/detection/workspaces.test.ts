@@ -30,6 +30,21 @@ describe('findWorkspaceDirs', () => {
     expect(await findWorkspaceDirs(dir, null)).toEqual(['api', 'app', 'services/billing']);
   });
 
+  it('finds ecosystem packages next to Node ones from the modules\' globs (Python, .NET)', async () => {
+    dir = await makeTree({
+      'frontend/package.json': PKG,
+      'backend/requirements.txt': '',
+      'backend/main.py': '',
+      'services/billing/pyproject.toml': '',
+      'worker/main.py': '',
+      'Api/Api.csproj': '',
+      'scripts/release.py': '',
+      'frontend/tools/pyproject.toml': '',
+    });
+    // scripts/release.py isn't an entry file; frontend/tools sits inside another package.
+    expect(await findWorkspaceDirs(dir, null)).toEqual(['Api', 'backend', 'frontend', 'services/billing', 'worker']);
+  });
+
   it('does not add sub-folders when workspaces are declared', async () => {
     dir = await makeTree({ 'packages/a/package.json': PKG, 'tools/b/package.json': PKG });
     expect(await findWorkspaceDirs(dir, { workspaces: ['packages/*'] })).toEqual(['packages/a']);

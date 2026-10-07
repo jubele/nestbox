@@ -1,0 +1,3 @@
+#!/bin/sh
+# The POSIX entry of the fake python (Scripts/python.cmd is the Windows one).
+exec node "$(dirname "$0")/../fake-python.js" "$@"

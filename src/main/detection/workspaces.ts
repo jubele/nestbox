@@ -87,24 +87,18 @@ async function subFolderPackages(root: string): Promise<string[]> {
     dot: false,
   });
 
-  // Ecosystem packages (e.g. Python, .NET)
+  // Ecosystem packages (e.g. Python, .NET): the modules' globs match marker files, whose folders are packages.
   const ecosystemGlobs = ECOSYSTEM_MODULES.flatMap((m) => m.packageGlobs);
-  const ecosystemPackages = ecosystemGlobs.length > 0
-    ? await glob(ecosystemGlobs, {
-        cwd: root,
-        ignore,
-        onlyDirectories: true,
-        dot: false,
-      })
-    : [];
+  const ecosystemManifests =
+    ecosystemGlobs.length > 0
+      ? await glob(ecosystemGlobs, { cwd: root, ignore, onlyFiles: true, dot: false })
+      : [];
+  // A marker inside a Node package (frontend/tools/pyproject.toml) belongs to that package.
+  const posixDir = (manifest: string) => posix.dirname(manifest.replace(/\\/g, '/'));
+  const nodeDirs = nodePackages.map(posixDir);
+  const insideNode = (manifest: string) => nodeDirs.some((d) => posixDir(manifest).startsWith(`${d}/`));
 
-  // Combine and deduplicate
-  const allPackages = new Set([
-    ...nodePackages,
-    ...ecosystemPackages.map((dir) => `${dir}/package.json`), // normalize to manifest path
-  ]);
-
-  return [...allPackages];
+  return [...nodePackages, ...ecosystemManifests.filter((m) => !insideNode(m))];
 }
 
 export async function findWorkspaceDirs(
