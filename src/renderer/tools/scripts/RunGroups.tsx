@@ -139,7 +139,10 @@ interface EditorProps {
 
 function RunGroupEditor({ projectId, open, onOpenChange, packages, initial, onSave }: EditorProps) {
   const [name, setName] = useState(initial?.name ?? '');
-  const [entries, setEntries] = useState<RunGroupEntry[]>(initial?.entries ?? []);
+  // A new group starts with each package's main command ticked.
+  const [entries, setEntries] = useState<RunGroupEntry[]>(
+    () => initial?.entries ?? packages.flatMap((p) => (p.main === null ? [] : [{ relPath: p.relPath, script: p.main }])),
+  );
   const [compose, setCompose] = useState<Record<string, ComposeChoice>>(() =>
     Object.fromEntries(
       (initial?.compose ?? []).map((c) => [c.relPath, { some: c.services.length > 0, services: c.services }]),

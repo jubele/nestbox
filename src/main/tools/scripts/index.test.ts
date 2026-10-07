@@ -72,6 +72,12 @@ function setup(projects: DetectedProject[] = [root, api]) {
       up: vi.fn(async (_projectId: string, _services: string[], _opts: { wait: boolean }) => ({ ok: true })),
       stop: vi.fn(async (_projectId: string, _services: string[]) => ({ ok: true })),
     },
+    envFiles: {
+      list: vi.fn(async (_dir: string): Promise<string[]> => ['.env', '.env.local']),
+      read: vi.fn(async (_dir: string, file: string): Promise<Record<string, string> | null> =>
+        file === '.env' ? { API_KEY: 'from-dotenv' } : null,
+      ),
+    },
   };
   const adapter = createDarwinAdapter({ runner: noopRunner, getEditorCommand: () => 'code' });
   const openInEditor = vi.fn(async () => {});
@@ -104,14 +110,15 @@ describe('scripts tool: list and lifecycle', () => {
     setGroups([{ name: 'dev', entries: [{ relPath: '', script: 'dev' }], compose: [] }]);
     expect(await call('r1', 'list')).toEqual({
       scripts: [
-        { name: 'dev', command: 'vite', autoRestart: false, kind: 'npm' },
-        { name: 'build', command: 'vite build', autoRestart: false, kind: 'npm' },
+        { name: 'dev', command: 'vite', autoRestart: false, kind: 'npm', envFile: null, main: false },
+        { name: 'build', command: 'vite build', autoRestart: false, kind: 'npm', envFile: null, main: false },
       ],
       runGroups: [{ name: 'dev', entries: [{ relPath: '', script: 'dev' }], compose: [] }],
       packages: [
-        { relPath: '', name: 'shop', scripts: ['dev', 'build'], compose: false },
-        { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false },
+        { relPath: '', name: 'shop', scripts: ['dev', 'build'], compose: false, main: null },
+        { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false, main: null },
       ],
+      envFiles: ['.env', '.env.local'],
       hidden: [],
       python: null,
     });
@@ -148,11 +155,11 @@ describe('scripts tool: list and lifecycle', () => {
     const { call, toolSettings, processes } = setup();
     await call(api.id, 'start', { script: 'dev' });
     expect(await call(api.id, 'setAutoRestart', { script: 'dev', enabled: true })).toEqual({ enabled: true });
-    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [{ relPath: 'packages/api', script: 'dev' }], commands: [], hidden: [], venvs: [] });
+    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [{ relPath: 'packages/api', script: 'dev' }], commands: [], envFiles: [], main: [], hidden: [], venvs: [] });
     expect(processes.get(api.id, 'dev')?.autoRestart).toBe(true);
     expect(await call(api.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', autoRestart: true }] });
     await call(api.id, 'setAutoRestart', { script: 'dev', enabled: false });
-    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [], commands: [], hidden: [], venvs: [] });
+    expect(toolSettings.get('r1/scripts')).toEqual({ autoRestart: [], commands: [], envFiles: [], main: [], hidden: [], venvs: [] });
   });
 
   it('starts with auto-restart from settings', async () => {
@@ -497,11 +504,12 @@ describe('scripts tool: Python and custom commands', () => {
     await call(backend.id, 'saveCommand', { name: 'seed', argv: ['python', 'seed.py', '--count', '10'] });
     expect(await call(backend.id, 'list')).toEqual({
       scripts: [
-        { name: 'dev', command: 'python -m uvicorn main:app --reload', autoRestart: false, kind: 'detected' },
-        { name: 'seed', command: 'python seed.py --count 10', autoRestart: false, kind: 'custom' },
+        { name: 'dev', command: 'python -m uvicorn main:app --reload', autoRestart: false, kind: 'detected', envFile: '.env', main: false },
+        { name: 'seed', command: 'python seed.py --count 10', autoRestart: false, kind: 'custom', envFile: '.env', main: false },
       ],
       runGroups: null,
       packages: null,
+      envFiles: ['.env', '.env.local'],
       hidden: [],
       python: { choice: 'auto', venv: 'backend/.venv', auto: 'backend/.venv' },
     });
@@ -543,6 +551,7 @@ describe('scripts tool: Python and custom commands', () => {
     expect(processes.logs(backend.id, 'main').lines.map((l) => l.text)).toEqual([
       '▸ No virtualenv (.venv) found: using python3 from PATH',
       '▸ python3 main.py',
+      '▸ env: .env (1 variable)',
     ]);
   });
 
@@ -633,7 +642,80 @@ describe('scripts tool: Python and custom commands', () => {
   });
 });
 
-describe('scripts tool: Python files', () => {
+describe('scripts tool: env files for commands', () => {
+  it('gives detected and custom commands .env by default, package.json scripts none', async () => {
+    const { call, platform } = pythonSetup();
+    await call(backend.id, 'start', { script: 'dev' });
+    await call(frontend.id, 'start', { script: 'dev' });
+    const [py, web] = spawnCalls(platform);
+    expect(py?.env['API_KEY']).toBe('from-dotenv');
+    expect(web?.env['API_KEY']).toBeUndefined();
+  });
+
+  it('switches a command to another file or none, and a script to .env', async () => {
+    const { call, platform, deps, toolSettings } = pythonSetup();
+    await call(backend.id, 'setEnvFile', { script: 'dev', file: '.env.local' });
+    await call(frontend.id, 'setEnvFile', { script: 'dev', file: '.env' });
+    expect(await call(backend.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', envFile: '.env.local' }] });
+    await call(backend.id, 'start', { script: 'dev' });
+    await call(frontend.id, 'start', { script: 'dev' });
+    expect(deps.envFiles.read).toHaveBeenCalledWith(BACKEND, '.env.local');
+    expect(spawnCalls(platform)[1]?.env['API_KEY']).toBe('from-dotenv');
+    await call(backend.id, 'setEnvFile', { script: 'dev', file: null });
+    expect(await call(backend.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', envFile: null }] });
+    // Back to the default: no override is kept.
+    await call(backend.id, 'setEnvFile', { script: 'dev', file: '.env' });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ envFiles: [{ relPath: 'frontend', script: 'dev', file: '.env' }] });
+    await expect(call(backend.id, 'setEnvFile', { script: 'nope', file: null })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(call(backend.id, 'setEnvFile', { script: 'dev', file: '../x' })).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('carries the env file over a rename and forgets it on delete', async () => {
+    const { call, toolSettings } = pythonSetup();
+    await call(backend.id, 'saveCommand', { name: 'worker', argv: ['python', 'worker.py'] });
+    await call(backend.id, 'setEnvFile', { script: 'worker', file: null });
+    await call(backend.id, 'saveCommand', { previousName: 'worker', name: 'jobs', argv: ['python', 'worker.py'] });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ envFiles: [{ relPath: 'backend', script: 'jobs', file: null }] });
+    await call(backend.id, 'deleteCommand', { name: 'jobs' });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ envFiles: [] });
+  });
+});
+
+describe('scripts tool: main command', () => {
+  it('marks one main per package, listed first and named in packages', async () => {
+    const { call } = pythonSetup();
+    await call(backend.id, 'saveCommand', { name: 'api', argv: ['python', 'server.py'], main: true });
+    expect(await call(backend.id, 'list')).toMatchObject({
+      scripts: [
+        { name: 'api', main: true },
+        { name: 'dev', main: false },
+      ],
+    });
+    await call(backend.id, 'setMain', { script: 'dev', main: true });
+    expect(await call('r2', 'list')).toMatchObject({
+      packages: [
+        { relPath: '', main: null },
+        { relPath: 'backend', main: 'dev' },
+        { relPath: 'frontend', main: null },
+      ],
+    });
+    await call(backend.id, 'setMain', { script: 'dev', main: false });
+    expect(await call(backend.id, 'list')).toMatchObject({ scripts: [{ name: 'dev', main: false }, { name: 'api', main: false }] });
+    await expect(call(backend.id, 'setMain', { script: 'nope', main: true })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('carries main over a rename, clears it with main: false and forgets it on delete', async () => {
+    const { call, toolSettings } = pythonSetup();
+    await call(backend.id, 'saveCommand', { name: 'api', argv: ['python', 'server.py'], main: true });
+    await call(backend.id, 'saveCommand', { previousName: 'api', name: 'server', argv: ['python', 'server.py'] });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ main: [{ relPath: 'backend', script: 'server' }] });
+    await call(backend.id, 'saveCommand', { previousName: 'server', name: 'server', argv: ['python', 'server.py'], main: false });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ main: [] });
+    await call(backend.id, 'setMain', { script: 'server', main: true });
+    await call(backend.id, 'deleteCommand', { name: 'server' });
+    expect(toolSettings.get('r2/scripts')).toMatchObject({ main: [] });
+  });
+
   it('lists Python files only in a Python package', async () => {
     const { call } = pythonSetup();
     expect(await call(frontend.id, 'pythonFiles')).toEqual({ files: [] });

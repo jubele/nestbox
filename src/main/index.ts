@@ -31,6 +31,7 @@ import { throttle } from './processes/throttle';
 import { createMainTools } from './tools';
 import { createClaudeCli } from './tools/claude/cli';
 import { createClaudeDocs } from './tools/claude/docs';
+import { entries, parseEnv } from './tools/env/dotenv';
 import { createEnvFileAccess } from './tools/env/env-files';
 import { watchDir } from './fs/watch-dir';
 import { createCertStore, generateWithSelfsigned } from './tools/static/cert-store';
@@ -192,6 +193,18 @@ if (!app.requestSingleInstanceLock()) {
         },
         emit: (projectId, event, payload) => emit('tools:event', { toolId: 'scripts', projectId, event, payload }),
         logger,
+        envFiles: {
+          list: async (dir) => (await envFiles.list(dir)).map((f) => f.name),
+          // Values go to the script's process only (ProcessManager): never logged or kept.
+          read: async (dir, file) => {
+            try {
+              return Object.fromEntries(entries(parseEnv((await envFiles.read(dir, file)).text)));
+            } catch (error) {
+              if (error instanceof NestboxError && error.code === 'NOT_FOUND') return null;
+              throw error;
+            }
+          },
+        },
         node: {
           advice: async (projectId) => {
             if (!toolHostRef) throw new NestboxError('INTERNAL', 'Tools are not ready');

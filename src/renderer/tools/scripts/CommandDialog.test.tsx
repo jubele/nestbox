@@ -7,7 +7,7 @@ import { CommandDialog } from './CommandDialog';
 import { installScriptsBridge } from './test-bridge';
 
 function open(
-  initial: { name: string; command: string } | null = null,
+  initial: { name: string; command: string; main?: boolean } | null = null,
   methods = {},
   pythonFiles: string[] = [],
 ) {
@@ -32,7 +32,11 @@ describe('CommandDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(callsTo('saveCommand')).toEqual([
-        { name: 'api', argv: ['uvicorn', 'app.main:app', '--reload', '--port', '8000'] },
+        {
+          name: 'api',
+          argv: ['uvicorn', 'app.main:app', '--reload', '--port', '8000'],
+          main: false,
+        },
       ]),
     );
     expect(calls[0]?.projectId).toBe('p1::backend');
@@ -62,7 +66,12 @@ describe('CommandDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(callsTo('saveCommand')).toEqual([
-        { previousName: 'seed', name: 'seed', argv: ['python', 'seed.py', '--count', '5'] },
+        {
+          previousName: 'seed',
+          name: 'seed',
+          argv: ['python', 'seed.py', '--count', '5'],
+          main: false,
+        },
       ]),
     );
   });
@@ -85,7 +94,7 @@ describe('CommandDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 
-  it('fills the command from a Python file', async () => {
+  it('fills the command from a Python file and saves it as the main command', async () => {
     const { callsTo } = open(null, {}, ['server.py', 'app/run server.py']);
     const picker = await screen.findByRole('combobox', { name: 'Python file' });
     await userEvent.selectOptions(picker, 'app/run server.py');
@@ -93,17 +102,26 @@ describe('CommandDialog', () => {
       'python "app/run server.py"',
     );
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('run-server');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Main command of this package' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(callsTo('saveCommand')).toEqual([
-        { name: 'run-server', argv: ['python', 'app/run server.py'] },
+        { name: 'run-server', argv: ['python', 'app/run server.py'], main: true },
       ]),
     );
   });
 
-  it('offers no Python file picker without Python files', async () => {
-    open({ name: 'api', command: 'node api.js' });
-    expect(await screen.findByRole('textbox', { name: 'Name' })).toHaveValue('api');
+  it('offers no Python file picker without Python files, and keeps main when editing', async () => {
+    const { callsTo } = open({ name: 'api', command: 'node api.js', main: true });
+    expect(
+      await screen.findByRole('checkbox', { name: 'Main command of this package' }),
+    ).toBeChecked();
     expect(screen.queryByRole('combobox', { name: 'Python file' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(callsTo('saveCommand')).toEqual([
+        { previousName: 'api', name: 'api', argv: ['node', 'api.js'], main: true },
+      ]),
+    );
   });
 });

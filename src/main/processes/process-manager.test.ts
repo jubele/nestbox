@@ -70,6 +70,33 @@ describe('ProcessManager start', () => {
     expect(texts('p1', 'api')).toEqual(['▸ python -m uvicorn main:app --reload']);
   });
 
+  it('loads the env file at every spawn, under the virtualenv and NestBox variables, logging only a count', async () => {
+    const { pm, platform, texts } = setup();
+    let vars: Record<string, string> | null = { API_KEY: 'k-secret', VIRTUAL_ENV: '/wrong', PATH: '/from-dotenv' };
+    const read = vi.fn(async () => vars);
+    await pm.start(
+      req({ script: 'api', argv: ['python', 'main.py'], env: { VIRTUAL_ENV: '/shop/.venv' }, pathPrepend: '/shop/.venv/bin', loadEnv: { file: '.env', read } }),
+    );
+    expect(platform.spawnScript).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({ API_KEY: 'k-secret', VIRTUAL_ENV: '/shop/.venv', PATH: `/shop/.venv/bin${delimiter}/from-dotenv` }),
+      }),
+    );
+    expect(texts('p1', 'api')).toEqual(['▸ python main.py', '▸ env: .env (3 variables)']);
+    vars = null;
+    await pm.restart(req({ script: 'api', argv: ['python', 'main.py'], loadEnv: { file: '.env', read } }));
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(texts('p1', 'api')).toContain('▸ .env not found: started without it');
+    expect(texts('p1', 'api').join('\n')).not.toContain('k-secret');
+  });
+
+  it('starts without the env file when it cannot be read', async () => {
+    const { pm, platform, texts } = setup();
+    await pm.start(req({ loadEnv: { file: '.env.local', read: async () => Promise.reject(new Error('EACCES')) } }));
+    expect(platform.spawnScript).toHaveBeenCalled();
+    expect(texts()).toContain('▲ .env.local could not be read: started without it');
+  });
+
   it('logs the version advice first, puts fnm\'s Node first on PATH and keeps the warning', async () => {
     const { pm, platform, texts } = setup();
     const summary = await pm.start(

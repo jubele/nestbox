@@ -10,8 +10,8 @@ import ScriptsPanel from './Panel';
 import { installScriptsBridge } from './test-bridge';
 
 const scripts = [
-  { name: 'dev', command: 'vite', autoRestart: false, kind: 'npm' as const },
-  { name: 'api', command: 'nest start', autoRestart: false, kind: 'npm' as const },
+  { name: 'dev', command: 'vite', autoRestart: false, kind: 'npm' as const, envFile: null, main: false },
+  { name: 'api', command: 'nest start', autoRestart: false, kind: 'npm' as const, envFile: null, main: false },
 ];
 
 describe('ScriptsPanel', () => {

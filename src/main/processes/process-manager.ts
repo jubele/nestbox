@@ -49,6 +49,11 @@ export interface StartRequest {
   argv?: string[];
   /** Extra variables (VIRTUAL_ENV, PYTHONUNBUFFERED). Paths and flags only, never values from .env. */
   env?: Record<string, string>;
+  /**
+   * An env file whose variables the script gets, read at every spawn so edits apply on the next (re)start.
+   * read() resolves null when the file is missing. The values go only to the child: never logged or kept.
+   */
+  loadEnv?: { file: string; read(): Promise<Record<string, string> | null> };
 }
 
 /** The env with `dir` first on PATH, under whatever casing the env uses for it (Windows: Path). */
@@ -290,6 +295,24 @@ export class ProcessManager {
     return entry;
   }
 
+  /** The request's env file, or nothing when it has none, is missing or can't be read (the log says which). */
+  private async readEnvFile(entry: Entry): Promise<Record<string, string>> {
+    const load = entry.req.loadEnv;
+    if (!load) return {};
+    const vars = await load.read().catch(() => undefined);
+    if (vars === undefined) {
+      this.system(entry, `▲ ${load.file} could not be read: started without it`);
+      return {};
+    }
+    if (vars === null) {
+      this.system(entry, `▸ ${load.file} not found: started without it`);
+      return {};
+    }
+    const n = Object.keys(vars).length;
+    this.system(entry, `▸ env: ${load.file} (${n} ${n === 1 ? 'variable' : 'variables'})`);
+    return vars;
+  }
+
   private async spawn(entry: Entry): Promise<void> {
     const run = ++entry.run;
     entry.stopRequested = false;
@@ -310,8 +333,12 @@ export class ProcessManager {
     let child: ChildProcess;
     try {
       const shell = await this.deps.platform.resolveShellEnv();
+      const fromFile = await this.readEnvFile(entry);
+      if (run !== entry.run) return; // a stop pre-empted the spawn
+      // The file's variables over the shell's; the virtualenv and NestBox's own variables over both.
+      const base = { ...shell, ...fromFile };
       const env = {
-        ...(entry.req.pathPrepend ? withPathFirst(shell, entry.req.pathPrepend) : shell),
+        ...(entry.req.pathPrepend ? withPathFirst(base, entry.req.pathPrepend) : base),
         ...entry.req.env,
         FORCE_COLOR: '1',
       };

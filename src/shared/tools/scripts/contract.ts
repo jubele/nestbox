@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CommandArgvSchema } from '../../command-line';
 import { COMMAND_NAME } from '../../detected';
+import { EnvFileNameSchema } from '../env/contract';
 import { LogLineSchema, LogSnapshotSchema, MAX_EXPORT_SEQS, ProcessSummarySchema } from '../../processes';
 import { defineContract, defineEvents, type ToolDefinition } from '../../tool';
 import { RunGroupEntrySchema, RunGroupSchema } from '../../types';
@@ -24,6 +25,16 @@ const settingsSchema = z.object({
   autoRestart: z.array(RunGroupEntrySchema).max(500).default([]),
   /** Custom commands across the root and its workspace packages. */
   commands: z.array(CustomCommandSchema).max(100).default([]),
+  /**
+   * Which env file a script or command gets, where it differs from the default (.env for detected and custom
+   * commands, none for package.json scripts). null = none.
+   */
+  envFiles: z
+    .array(RunGroupEntrySchema.extend({ file: EnvFileNameSchema.nullable() }))
+    .max(500)
+    .default([]),
+  /** The main script or command of a package, at most one per package. */
+  main: z.array(RunGroupEntrySchema).max(200).default([]),
   /** Detected commands the user removed (detection would find them again, so they are hidden). */
   hidden: z.array(RunGroupEntrySchema).max(500).default([]),
   /**
@@ -58,6 +69,10 @@ export const ScriptInfoSchema = z.object({
   command: z.string(),
   autoRestart: z.boolean(),
   kind: z.enum(SCRIPT_KINDS),
+  /** The env file its process gets, or null. */
+  envFile: z.string().nullable(),
+  /** The package's main script or command. */
+  main: z.boolean(),
 });
 export type ScriptInfo = z.infer<typeof ScriptInfoSchema>;
 
@@ -67,6 +82,8 @@ export const PackageScriptsSchema = z.object({
   scripts: z.array(z.string()),
   /** Has a compose file, so the run group editor offers its services. */
   compose: z.boolean(),
+  /** The package's main script or command; a new run group starts with it ticked. */
+  main: z.string().nullable(),
 });
 export type PackageScripts = z.infer<typeof PackageScriptsSchema>;
 
@@ -91,6 +108,8 @@ export const scriptsContract = defineContract({
       runGroups: z.array(RunGroupSchema).nullable(),
       /** Root projects only: every package's scripts, for the run group editor. */
       packages: z.array(PackageScriptsSchema).nullable(),
+      /** The package's env files right now, for the Env choice of each row. */
+      envFiles: z.array(z.string()),
       /** Detected commands the user removed from this package, to restore. */
       hidden: z.array(z.object({ name: z.string(), command: z.string() })),
       /**
@@ -125,9 +144,17 @@ export const scriptsContract = defineContract({
     input: z.strictObject({ path: z.string().min(1).max(4096), line: z.number().int().positive() }),
     output: z.void(),
   },
-  /** Adds a custom command, or replaces `previousName` (a rename keeps auto-restart and run groups). */
+  /**
+   * Adds a custom command, or replaces `previousName` (a rename keeps auto-restart, run groups, the env file
+   * and main). `main: true` also makes it the package's main command.
+   */
   saveCommand: {
-    input: z.strictObject({ previousName: CommandName.optional(), name: CommandName, argv: CommandArgvSchema }),
+    input: z.strictObject({
+      previousName: CommandName.optional(),
+      name: CommandName,
+      argv: CommandArgvSchema,
+      main: z.boolean().optional(),
+    }),
     output: z.void(),
   },
   /** Removes a detected command from the package (it stays hidden until showCommand). */
@@ -148,6 +175,13 @@ export const scriptsContract = defineContract({
     }),
     output: z.void(),
   },
+  /** The env file a script or command gets; null = none. */
+  setEnvFile: {
+    input: z.strictObject({ script: ScriptName, file: EnvFileNameSchema.nullable() }),
+    output: z.void(),
+  },
+  /** Makes a script or command the package's main one (`main: false` clears it). */
+  setMain: { input: z.strictObject({ script: ScriptName, main: z.boolean() }), output: z.void() },
   /** The package's .py files (posix paths, three levels deep at most), for "run a Python file". */
   pythonFiles: { input: z.strictObject({}), output: z.object({ files: z.array(z.string()) }) },
   deleteCommand: { input: z.strictObject({ name: CommandName }), output: z.void() },

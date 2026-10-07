@@ -30,13 +30,14 @@ export function CommandDialog({
 }: {
   projectId: string;
   /** `command` is the line the Scripts list shows, which splits back to the same arguments. */
-  initial: { name: string; command: string } | null;
+  initial: { name: string; command: string; main?: boolean } | null;
   onOpenChange(open: boolean): void;
 }) {
   const { save } = useCommandActions(projectId);
   const [name, setName] = useState(initial?.name ?? '');
   const [line, setLine] = useState(initial?.command ?? '');
   const { data: python } = usePythonFiles(projectId);
+  const [main, setMain] = useState(initial?.main ?? false);
   const [pickedFile, setPickedFile] = useState('');
   const pickFile = (file: string) => {
     setPickedFile(file);
@@ -69,7 +70,7 @@ export function CommandDialog({
             e.preventDefault();
             if (!canSave || !split?.ok) return;
             save.mutate(
-              { ...(initial ? { previousName: initial.name } : {}), name, argv: split.argv },
+              { ...(initial ? { previousName: initial.name } : {}), name, argv: split.argv, main },
               { onSuccess: () => onOpenChange(false) },
             );
           }}
@@ -123,6 +124,15 @@ export function CommandDialog({
                   ` with ${split.argv.length - 1} ${split.argv.length === 2 ? 'argument' : 'arguments'}`}
               </span>
             )}
+          </label>
+          <label className="flex items-center gap-2 text-xs text-fg">
+            <input
+              type="checkbox"
+              className="accent-brand"
+              checked={main}
+              onChange={(e) => setMain(e.target.checked)}
+            />
+            Main command of this package
           </label>
           <DialogFooter>
             <Button

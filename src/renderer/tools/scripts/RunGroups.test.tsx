@@ -7,8 +7,8 @@ import { RunGroups } from './RunGroups';
 import { installScriptsBridge } from './test-bridge';
 
 const packages = [
-  { relPath: '', name: 'shop', scripts: ['dev', 'build'], compose: true },
-  { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false },
+  { relPath: '', name: 'shop', scripts: ['dev', 'build'], compose: true, main: null },
+  { relPath: 'packages/api', name: '@shop/api', scripts: ['dev'], compose: false, main: null },
 ];
 const composeOk = () => ({
   state: 'ok',
@@ -80,6 +80,18 @@ describe('RunGroups', () => {
         },
       ]),
     );
+  });
+
+  it("starts a new group with each package's main command ticked", async () => {
+    installScriptsBridge({
+      runGroups: [],
+      packages: packages.map((p) => (p.relPath === 'packages/api' ? { ...p, main: 'dev' } : p)),
+    });
+    renderWithProviders(<RunGroups projectId="p1" />);
+    await userEvent.click(await screen.findByRole('button', { name: 'New group' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New run group' });
+    expect(within(within(dialog).getByRole('group', { name: 'packages/api' })).getByRole('checkbox', { name: 'dev' })).toBeChecked();
+    expect(within(within(dialog).getByRole('group', { name: 'Root' })).getByRole('checkbox', { name: 'dev' })).not.toBeChecked();
   });
 
   it('edits with the previous name', async () => {
