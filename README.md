@@ -14,7 +14,7 @@ Built with Electron, React and Vite. Runs on Windows and macOS (macOS is a previ
 
 | | |
 | --- | --- |
-| **Projects** | Detects the package manager, scripts, workspace packages, env files, Prisma, Docker Compose, the build output and Claude Code files. Supports Node.js, .NET, and other languages via the ecosystem framework. Workspace packages appear as sub-projects. |
+| **Projects** | Detects the package manager, scripts, workspace packages, env files, Prisma, Docker Compose, the build output and Claude Code files. Supports Node.js, Python, .NET, and other languages via the ecosystem framework: a Python backend gets its Django, entry-file and pytest commands and runs in its virtualenv (its own, the project folder's, or one you pick), so a `frontend/` + `backend/` folder is one project. Workspace packages appear as sub-projects. |
 | **Scripts and logs** | Start, stop and restart scripts (the whole process tree), run groups (which can bring Docker Compose services up first and wait until they're healthy), auto-restart with backoff, your own commands (any program with arguments, run without a shell, with the env file you pick) and a main command per package, and a virtualised log viewer with ANSI colours, JSON log levels, search and split panes. A tray icon shows what is running. |
 | **Ports** | Every listening port on the machine, with the NestBox script that owns it. Stop the script, or kill a foreign process after confirming. "Port in use" errors in a log offer the fix. |
 | **Env** | A matrix of keys across `.env`, `.env.example` and profiles (`.env.staging`, …): what is missing, empty or undocumented. Values stay masked until revealed. Edits keep comments and formatting, and profiles switch with a backup. |
@@ -162,7 +162,7 @@ Events (`defineEvents`) push data from main, as the static server's request log 
 
 v1: projects, scripts and logs, ports, env, static server, Claude Code, command palette, Windows installer.
 
-v2 started with the macOS build (v1.1.0, preview), git glance (v1.2.0), the database panel (v1.3.0), the TODO scanner (v1.4.0), health checks (v1.5.0), Docker Compose (v1.6.0), the mock API (v1.7.0), the request inspector (v1.8.0), its public tunnel (v1.9.0) Compose services in run groups (v1.10.0) the Node version check (v1.11.0), dependency health (v1.12.0), a light theme (v1.13.0) deployments (v1.14.0), env vs production (v1.15.0) the ready-to-deploy check (v1.16.0) tool toggles (v1.17.0), sidebar groups (v1.18.0), CI status (v1.19.0), multi-folder adding (v1.20.0) and custom commands (v1.21.0). See [the spec](docs/nestbox-spec.md#v2-tools-out-of-scope-for-v1).
+v2 started with the macOS build (v1.1.0, preview), git glance (v1.2.0), the database panel (v1.3.0), the TODO scanner (v1.4.0), health checks (v1.5.0), Docker Compose (v1.6.0), the mock API (v1.7.0), the request inspector (v1.8.0), its public tunnel (v1.9.0) Compose services in run groups (v1.10.0) the Node version check (v1.11.0), dependency health (v1.12.0), a light theme (v1.13.0) deployments (v1.14.0), env vs production (v1.15.0) the ready-to-deploy check (v1.16.0) tool toggles (v1.17.0), sidebar groups (v1.18.0), CI status (v1.19.0), multi-folder adding (v1.20.0), custom commands (v1.21.0), ecosystems with .NET (v1.22.0) and Python (v1.23.0). See [the spec](docs/nestbox-spec.md#v2-tools-out-of-scope-for-v1).
 
 ## License
 

@@ -303,9 +303,14 @@ If you need to parse a config file or run a subprocess to determine the environm
 Your module integrates automatically with:
 
 1. **Project detection** (`detectProject()`): Runs during initial scan and rescan
-2. **Scripts tool**: Tasks appear as `'detected'` kind commands
-3. **Project-info**: `summary()` appears in the info panel
-4. **Workspace detection**: `packageGlobs` finds nested packages
+2. **Scripts tool**: Tasks appear as `'detected'` kind commands; the user can remove (hide) and restore them
+3. **Run environment**: `runEnv()` applies to the package's detected tasks *and* its custom commands. It gets
+   `dir` (the package), `rootDir` (the project folder) and `settings` (`EcosystemChoices`, e.g. the virtualenv
+   the user picked). It may return `programs` to swap the command's first word (`{ python: 'python3' }`).
+4. **Project-info**: `summary()` appears in the overview card and the info panel
+5. **Workspace detection**: `packageGlobs` match marker files (`*/pyproject.toml`, `**/*.csproj`); each match's
+   folder becomes a package, unless it sits inside a Node package
+6. **Add command dialog** (optional): `files()` lists files to run, with the argv each one becomes
 
 ## Testing Strategy
 
@@ -333,6 +338,7 @@ Test these scenarios:
 ## Examples
 
 See existing modules:
+- [`python/`](../src/main/ecosystems/python/index.ts) - Names-only detection, a virtualenv picked in `runEnv` (the package's own, the project folder's, or the user's choice), a program swap (`python` → `python3`) and a `files()` picker
 - [`dotnet.ts`](../src/main/ecosystems/dotnet.ts) - Simple, file-extension based detection
 - [`test-module.ts`](../src/main/ecosystems/test-module.ts) - Test fixture showing all features
 
@@ -378,15 +384,15 @@ tasks(info) {
 
 ### Platform-Specific Paths
 
+Platform differences live in the platform adapter (only `src/main/platform/` may read `process.platform`), so
+a module asks the adapter instead of checking the OS itself:
+
 ```typescript
 async runEnv(ctx, info) {
-  if (!info.venvPath) return {};
+  if (!info.venvPath) return { programs: { python: ctx.platform.pythonCommand } }; // python3 on macOS
 
-  const binDir = ctx.platform.isWindows
-    ? `${info.venvPath}\\Scripts`
-    : `${info.venvPath}/bin`;
-
-  return { pathPrepend: binDir };
+  const venv = join(ctx.dir, info.venvPath);
+  return { pathPrepend: ctx.platform.venvBinDir(venv) }; // Scripts\ on Windows, bin/ elsewhere
 }
 ```
 
